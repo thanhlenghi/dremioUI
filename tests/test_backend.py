@@ -22,7 +22,7 @@ class FakeDremioClient:
         return {"id": catalog_id, "path": ["src"]}
 
     async def get_catalog_permissions(self, catalog_id: str):
-        return {"users": [], "roles": []}
+        return {"effectivePermissions": [], "grants": []}
 
     async def list_recent_jobs(self, limit: int = 50):
         return [
@@ -66,7 +66,7 @@ class FakeQnaProvider:
 
 class FakeListPermissionsDremioClient(FakeDremioClient):
     async def get_catalog_permissions(self, catalog_id: str):
-        return ["READ_METADATA", "READ", "SELECT"]
+        return {"effectivePermissions": ["READ_METADATA", "READ", "SELECT"], "grants": []}
 
 
 class FakeTransientJobsDremioClient(DremioClient):
@@ -208,7 +208,11 @@ def test_catalog_object_accepts_list_permissions() -> None:
         app.dependency_overrides.pop(get_current_session, None)
 
     assert response.status_code == 200
-    assert response.json()["permissions"] == ["READ_METADATA", "READ", "SELECT"]
+    assert response.json()["permissions"]["effectivePermissions"] == [
+        "READ_METADATA",
+        "READ",
+        "SELECT",
+    ]
 
 
 async def test_recent_jobs_retries_transient_metadata_retrieval() -> None:

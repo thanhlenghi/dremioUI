@@ -43,15 +43,28 @@ class DremioClient:
 
     async def get_catalog_permissions(self, catalog_id: str) -> dict[str, Any] | None:
         encoded = quote(catalog_id, safe="")
+        permissions_payload: dict[str, Any] | None = None
         try:
             payload = await self._request(
                 "GET",
                 f"/api/v3/catalog/{encoded}",
                 params={"include": "permissions"},
             )
-            return payload.get("permissions", payload)
+            permissions_payload = {"effectivePermissions": payload.get("permissions", [])}
         except DremioError:
-            return None
+            permissions_payload = {"effectivePermissions": []}
+
+        try:
+            grants_payload = await self._request("GET", f"/api/v3/catalog/{encoded}/grants")
+        except DremioError:
+            return permissions_payload
+
+        return {
+            **permissions_payload,
+            "availablePrivileges": grants_payload.get("availablePrivileges", []),
+            "grants": grants_payload.get("grants", []),
+            "rawGrants": grants_payload,
+        }
 
     async def submit_sql(self, sql: str, context: list[str] | None = None) -> str:
         payload: dict[str, Any] = {"sql": sql}

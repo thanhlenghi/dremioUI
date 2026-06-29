@@ -3,13 +3,17 @@ import {
   ChevronDown,
   ChevronRight,
   Database,
+  Eye,
   File,
+  FileText,
   Folder,
   FolderOpen,
   Gauge,
   History,
+  Home,
   Info,
   KeyRound,
+  Library,
   Loader2,
   LogOut,
   Play,
@@ -307,13 +311,7 @@ function CatalogView({
             <h3>Metadata</h3>
             <pre>{JSON.stringify(details?.raw ?? {}, null, 2)}</pre>
             <h3>RBAC</h3>
-            <pre>
-              {JSON.stringify(
-                details?.permissions ?? { status: "No permission details returned" },
-                null,
-                2
-              )}
-            </pre>
+            <RbacPanel permissions={details?.permissions} />
           </div>
         ) : (
           <div className="empty-state">Choose a source, folder, dataset, or view.</div>
@@ -321,6 +319,190 @@ function CatalogView({
       </aside>
     </section>
   );
+}
+
+type RbacGrant = {
+  id?: string;
+  name?: string;
+  email?: string;
+  firstName?: string;
+  lastName?: string;
+  granteeType?: string;
+  type?: string;
+  privileges?: string[];
+  permissions?: string[];
+  inherited?: boolean;
+  isInherited?: boolean;
+  inheritedFrom?: unknown;
+  source?: string;
+  path?: string[];
+};
+
+type NormalizedGrant = {
+  id: string;
+  name: string;
+  type: "USER" | "ROLE" | "OTHER";
+  privileges: string[];
+  inherited: boolean;
+  inheritedFrom?: string;
+};
+
+function RbacPanel({ permissions }: { permissions: ObjectDetails["permissions"] }) {
+  const grants = normalizeGrants(permissions);
+  const users = grants.filter((grant) => grant.type === "USER");
+  const roles = grants.filter((grant) => grant.type === "ROLE");
+  const effectivePermissions = normalizeEffectivePermissions(permissions);
+
+  if (grants.length === 0 && effectivePermissions.length === 0) {
+    return <div className="empty-state rbac-empty">No RBAC details returned for this object.</div>;
+  }
+
+  return (
+    <div className="rbac-panel">
+      {effectivePermissions.length > 0 && (
+        <div className="rbac-section">
+          <div className="rbac-section-heading">
+            <h4>Effective access</h4>
+            <span>Current token</span>
+          </div>
+          <PermissionChips privileges={effectivePermissions} inherited={false} />
+        </div>
+      )}
+      <GrantSection title="Users" grants={users} emptyText="No user assignments returned." />
+      <GrantSection title="Roles" grants={roles} emptyText="No role assignments returned." />
+    </div>
+  );
+}
+
+function GrantSection({
+  title,
+  grants,
+  emptyText
+}: {
+  title: string;
+  grants: NormalizedGrant[];
+  emptyText: string;
+}) {
+  return (
+    <div className="rbac-section">
+      <div className="rbac-section-heading">
+        <h4>{title}</h4>
+        <span>{grants.length} assignments</span>
+      </div>
+      {grants.length === 0 ? (
+        <div className="rbac-empty-row">{emptyText}</div>
+      ) : (
+        <div className="rbac-grant-list">
+          {grants.map((grant) => (
+            <div
+              className={grant.inherited ? "rbac-grant inherited" : "rbac-grant explicit"}
+              key={`${grant.type}-${grant.id}-${grant.name}`}
+            >
+              <div className="rbac-principal">
+                <strong>{grant.name}</strong>
+                <span>{grant.inherited ? inheritedLabel(grant) : "Explicit assignment"}</span>
+              </div>
+              <PermissionChips privileges={grant.privileges} inherited={grant.inherited} />
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function PermissionChips({
+  privileges,
+  inherited
+}: {
+  privileges: string[];
+  inherited: boolean;
+}) {
+  return (
+    <div className="permission-chips">
+      {privileges.map((privilege) => (
+        <span className={inherited ? "permission-chip inherited" : "permission-chip explicit"} key={privilege}>
+          {privilege}
+        </span>
+      ))}
+    </div>
+  );
+}
+
+function normalizeGrants(permissions: ObjectDetails["permissions"]): NormalizedGrant[] {
+  const payload = permissions && !Array.isArray(permissions) ? permissions : {};
+  const grants = Array.isArray(payload.grants) ? payload.grants : [];
+  return grants
+    .filter(isRecord)
+    .map((grant) => {
+      const typedGrant = grant as RbacGrant;
+      const granteeType = String(typedGrant.granteeType ?? typedGrant.type ?? "OTHER").toUpperCase();
+      const type = granteeType === "USER" || granteeType === "ROLE" ? granteeType : "OTHER";
+      return {
+        id: String(typedGrant.id ?? typedGrant.name ?? "unknown"),
+        name: principalName(typedGrant),
+        type,
+        privileges: normalizePrivilegeList(typedGrant.privileges ?? typedGrant.permissions ?? []),
+        inherited: isInheritedGrant(typedGrant),
+        inheritedFrom: inheritedFrom(typedGrant)
+      };
+    });
+}
+
+function normalizeEffectivePermissions(permissions: ObjectDetails["permissions"]) {
+  if (Array.isArray(permissions)) {
+    return normalizePrivilegeList(permissions);
+  }
+  if (permissions && Array.isArray(permissions.effectivePermissions)) {
+    return normalizePrivilegeList(permissions.effectivePermissions);
+  }
+  if (permissions && Array.isArray(permissions.permissions)) {
+    return normalizePrivilegeList(permissions.permissions);
+  }
+  return [];
+}
+
+function normalizePrivilegeList(value: unknown) {
+  return Array.isArray(value) ? value.map(String).sort() : [];
+}
+
+function principalName(grant: RbacGrant) {
+  const fullName = [grant.firstName, grant.lastName].filter(Boolean).join(" ");
+  return String(grant.name ?? (fullName || grant.email || grant.id || "Unknown principal"));
+}
+
+function isInheritedGrant(grant: RbacGrant) {
+  if (typeof grant.inherited === "boolean") {
+    return grant.inherited;
+  }
+  if (typeof grant.isInherited === "boolean") {
+    return grant.isInherited;
+  }
+  if (grant.inheritedFrom) {
+    return true;
+  }
+  return typeof grant.source === "string" && grant.source.toUpperCase() === "INHERITED";
+}
+
+function inheritedFrom(grant: RbacGrant) {
+  if (Array.isArray(grant.path)) {
+    return grant.path.join(".");
+  }
+  if (typeof grant.inheritedFrom === "string") {
+    return grant.inheritedFrom;
+  }
+  if (isRecord(grant.inheritedFrom) && Array.isArray(grant.inheritedFrom.path)) {
+    return grant.inheritedFrom.path.map(String).join(".");
+  }
+  return undefined;
+}
+
+function inheritedLabel(grant: NormalizedGrant) {
+  return grant.inheritedFrom ? `Inherited from ${grant.inheritedFrom}` : "Inherited assignment";
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
 function CatalogTreeNode({
@@ -424,17 +606,40 @@ function isExpandable(item: CatalogItem) {
 }
 
 function iconForItem(item: CatalogItem, expanded: boolean) {
-  const label = objectTypeLabel(item).toUpperCase();
-  if (label.includes("SOURCE") || label.includes("SPACE") || label.includes("FOLDER")) {
+  const type = item.type.toUpperCase();
+  const containerType = item.container_type?.toUpperCase() ?? "";
+  const label = rawObjectTypeLabel(item).toUpperCase();
+
+  if (type === "SOURCE" || containerType === "SOURCE") {
+    return Database;
+  }
+  if (containerType === "SPACE") {
+    return Library;
+  }
+  if (containerType === "HOME") {
+    return Home;
+  }
+  if (label.includes("FOLDER")) {
     return expanded ? FolderOpen : Folder;
   }
-  if (label.includes("DATASET") || label.includes("TABLE") || label.includes("VIEW")) {
+  if (label.includes("VIEW")) {
+    return Eye;
+  }
+  if (label.includes("DATASET") || label.includes("TABLE")) {
     return Table2;
+  }
+  if (label.includes("FILE")) {
+    return FileText;
   }
   return File;
 }
 
 function objectTypeLabel(item: CatalogItem) {
+  const label = rawObjectTypeLabel(item);
+  return label.toUpperCase() === "SOURCE" ? "Catalog" : label;
+}
+
+function rawObjectTypeLabel(item: CatalogItem) {
   return item.container_type ?? item.type;
 }
 
@@ -737,6 +942,9 @@ function adminItemName(item: AdminItem, fallback: string) {
 }
 
 function adminItemSubtitle(item: AdminItem) {
+  if ("identityType" in item || "source" in item || "authProvider" in item) {
+    return userOriginLabel(item);
+  }
   return String(
     item.type ??
       item.identityType ??
@@ -745,6 +953,21 @@ function adminItemSubtitle(item: AdminItem) {
       item.engineState ??
       "Record"
   );
+}
+
+function userOriginLabel(item: AdminItem) {
+  const source = String(item.source ?? item.authProvider ?? item.provider ?? "").toLowerCase();
+  const identityType = String(item.identityType ?? "").toUpperCase();
+  if (source) {
+    return source.includes("local") || source.includes("internal") ? "Internal" : "External";
+  }
+  if (identityType === "REGULAR_USER" || identityType === "SERVICE_USER") {
+    return "Internal";
+  }
+  if (identityType) {
+    return "External";
+  }
+  return "Unknown origin";
 }
 
 function InfoPill({ label, value }: { label: string; value: string }) {
