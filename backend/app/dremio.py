@@ -157,7 +157,36 @@ class DremioClient:
             type=str(item.get("type") or item.get("entityType") or "unknown"),
             tag=item.get("tag"),
             container_type=item.get("containerType"),
+            source_type=DremioClient._source_type(item),
         )
+
+    @staticmethod
+    def _source_type(item: dict[str, Any]) -> str | None:
+        candidates: list[Any] = [
+            item.get("sourceType"),
+            item.get("source_type"),
+            item.get("sourceTypeName"),
+            item.get("pluginType"),
+            item.get("storageType"),
+            item.get("connectionType"),
+        ]
+        for field in ("sourceConfig", "config", "connectionConf", "connectionConfig"):
+            config = item.get(field)
+            if isinstance(config, dict):
+                candidates.extend(
+                    [
+                        config.get("type"),
+                        config.get("sourceType"),
+                        config.get("pluginType"),
+                        config.get("storageType"),
+                        config.get("connectionType"),
+                    ]
+                )
+
+        for candidate in candidates:
+            if isinstance(candidate, str) and candidate.strip():
+                return candidate.strip()
+        return None
 
     @staticmethod
     def _job_summary(row: dict[str, Any]) -> JobSummary:

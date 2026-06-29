@@ -2,6 +2,7 @@ import {
   Bot,
   ChevronDown,
   ChevronRight,
+  Cloud,
   Database,
   Eye,
   File,
@@ -347,11 +348,80 @@ type NormalizedGrant = {
   inheritedFrom?: string;
 };
 
+type PrincipalRef = {
+  id?: string;
+  name?: string;
+};
+
+type RbacUser = {
+  id: string;
+  name: string;
+  email?: string;
+  roles: PrincipalRef[];
+};
+
+type EffectiveAccessEntry = {
+  key: string;
+  label: string;
+  detail: string;
+  privileges: string[];
+  inherited: boolean;
+};
+
+type EffectivePrivilege = {
+  privilege: string;
+  inherited: boolean;
+};
+
 function RbacPanel({ permissions }: { permissions: ObjectDetails["permissions"] }) {
+  const [rbacUsers, setRbacUsers] = useState<RbacUser[]>([]);
+  const [selectedUserId, setSelectedUserId] = useState("");
+  const [usersLoading, setUsersLoading] = useState(false);
+  const [userLoadError, setUserLoadError] = useState("");
   const grants = normalizeGrants(permissions);
   const users = grants.filter((grant) => grant.type === "USER");
   const roles = grants.filter((grant) => grant.type === "ROLE");
   const effectivePermissions = normalizeEffectivePermissions(permissions);
+  const selectableUsers = useMemo(() => mergeRbacUsers(rbacUsers, users), [rbacUsers, users]);
+  const effectiveSelectedUserId = selectableUsers.some((user) => user.id === selectedUserId)
+    ? selectedUserId
+    : selectableUsers[0]?.id ?? "";
+  const selectedUser = selectableUsers.find((user) => user.id === effectiveSelectedUserId);
+  const userEffectiveAccess = selectedUser ? effectiveAccessForUser(selectedUser, grants) : [];
+  const userEffectivePrivileges = aggregateEffectivePrivileges(userEffectiveAccess);
+
+  useEffect(() => {
+    let cancelled = false;
+    setUsersLoading(true);
+    setUserLoadError("");
+    api
+      .users()
+      .then((response) => {
+        if (cancelled) {
+          return;
+        }
+        const normalizedUsers = normalizeRbacUsers(response.items);
+        setRbacUsers(normalizedUsers);
+        setSelectedUserId((current) =>
+          normalizedUsers.some((user) => user.id === current)
+            ? current
+            : normalizedUsers[0]?.id ?? ""
+        );
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          setUserLoadError(err instanceof Error ? err.message : "Could not load users");
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setUsersLoading(false);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   if (grants.length === 0 && effectivePermissions.length === 0) {
     return <div className="empty-state rbac-empty">No RBAC details returned for this object.</div>;
@@ -368,6 +438,63 @@ function RbacPanel({ permissions }: { permissions: ObjectDetails["permissions"] 
           <PermissionChips privileges={effectivePermissions} inherited={false} />
         </div>
       )}
+      <div className="rbac-section">
+        <div className="rbac-section-heading">
+          <h4>User effective access</h4>
+          <span>{selectableUsers.length} users</span>
+        </div>
+        <label className="effective-access-control">
+          <span>User</span>
+          <select
+            value={effectiveSelectedUserId}
+            onChange={(event) => setSelectedUserId(event.target.value)}
+            disabled={selectableUsers.length === 0}
+          >
+            {selectableUsers.map((user) => (
+              <option key={user.id} value={user.id}>
+                {user.name}
+              </option>
+            ))}
+          </select>
+        </label>
+        {usersLoading && <div className="rbac-empty-row">Loading users</div>}
+        {userLoadError && <div className="rbac-empty-row">User list unavailable: {userLoadError}</div>}
+        {!selectedUser ? (
+          <div className="rbac-empty-row">No users returned for access calculation.</div>
+        ) : (
+          <div className="effective-access-card">
+            <div className="rbac-principal">
+              <strong>{selectedUser.name}</strong>
+              <span>
+                {selectedUser.roles.length > 0
+                  ? `${selectedUser.roles.length} roles considered`
+                  : "No roles returned for this user"}
+              </span>
+            </div>
+            {userEffectivePrivileges.length > 0 ? (
+              <EffectivePermissionChips privileges={userEffectivePrivileges} />
+            ) : (
+              <div className="rbac-empty-row">No direct or role-derived assignments on this object.</div>
+            )}
+            {userEffectiveAccess.length > 0 && (
+              <div className="effective-access-breakdown">
+                {userEffectiveAccess.map((entry) => (
+                  <div
+                    className={entry.inherited ? "rbac-grant inherited" : "rbac-grant explicit"}
+                    key={entry.key}
+                  >
+                    <div className="rbac-principal">
+                      <strong>{entry.label}</strong>
+                      <span>{entry.detail}</span>
+                    </div>
+                    <PermissionChips privileges={entry.privileges} inherited={entry.inherited} />
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
       <GrantSection title="Users" grants={users} emptyText="No user assignments returned." />
       <GrantSection title="Roles" grants={roles} emptyText="No role assignments returned." />
     </div>
@@ -429,6 +556,21 @@ function PermissionChips({
   );
 }
 
+function EffectivePermissionChips({ privileges }: { privileges: EffectivePrivilege[] }) {
+  return (
+    <div className="permission-chips">
+      {privileges.map((privilege) => (
+        <span
+          className={privilege.inherited ? "permission-chip inherited" : "permission-chip explicit"}
+          key={privilege.privilege}
+        >
+          {privilege.privilege}
+        </span>
+      ))}
+    </div>
+  );
+}
+
 function normalizeGrants(permissions: ObjectDetails["permissions"]): NormalizedGrant[] {
   const payload = permissions && !Array.isArray(permissions) ? permissions : {};
   const grants = Array.isArray(payload.grants) ? payload.grants : [];
@@ -460,6 +602,115 @@ function normalizeEffectivePermissions(permissions: ObjectDetails["permissions"]
     return normalizePrivilegeList(permissions.permissions);
   }
   return [];
+}
+
+function normalizeRbacUsers(items: AdminItem[]): RbacUser[] {
+  return items.map((item) => {
+    const name = adminItemName(item, "User");
+    const email = stringValue(item.email ?? item.userName ?? item.username);
+    return {
+      id: stringValue(item.id ?? email ?? name) ?? name,
+      name,
+      email: email ?? undefined,
+      roles: roleRefsFromUser(item)
+    };
+  });
+}
+
+function mergeRbacUsers(adminUsers: RbacUser[], userGrants: NormalizedGrant[]) {
+  const merged = new Map<string, RbacUser>();
+  adminUsers.forEach((user) => merged.set(user.id, user));
+  userGrants.forEach((grant) => {
+    const existing = Array.from(merged.values()).find((user) => principalMatchesUser(grant, user));
+    if (!existing) {
+      merged.set(grant.id, { id: grant.id, name: grant.name, roles: [] });
+    }
+  });
+  return Array.from(merged.values()).sort((left, right) => left.name.localeCompare(right.name));
+}
+
+function roleRefsFromUser(item: AdminItem): PrincipalRef[] {
+  const roleFields = [item.roles, item.memberOf, item.roleIds, item.roleNames, item.role];
+  return roleFields.flatMap(roleRefsFromValue).filter((role) => role.id || role.name);
+}
+
+function roleRefsFromValue(value: unknown): PrincipalRef[] {
+  if (!value) {
+    return [];
+  }
+  if (Array.isArray(value)) {
+    return value.flatMap(roleRefsFromValue);
+  }
+  if (typeof value === "string") {
+    return [{ id: value, name: value }];
+  }
+  if (isRecord(value)) {
+    const id = stringValue(value.id ?? value.roleId ?? value.name);
+    const name = stringValue(value.name ?? value.roleName ?? value.id);
+    return [{ id: id ?? undefined, name: name ?? undefined }];
+  }
+  return [];
+}
+
+function effectiveAccessForUser(user: RbacUser, grants: NormalizedGrant[]): EffectiveAccessEntry[] {
+  const entries: EffectiveAccessEntry[] = [];
+  grants.forEach((grant) => {
+    if (grant.type === "USER" && principalMatchesUser(grant, user)) {
+      entries.push({
+        key: `user-${grant.id}-${grant.name}`,
+        label: "Direct assignment",
+        detail: grant.inherited ? inheritedLabel(grant) : "Explicit assignment",
+        privileges: grant.privileges,
+        inherited: grant.inherited
+      });
+    }
+    if (grant.type === "ROLE") {
+      const matchingRole = user.roles.find((role) => principalMatchesRole(grant, role));
+      if (matchingRole) {
+        entries.push({
+          key: `role-${grant.id}-${grant.name}`,
+          label: `Role: ${matchingRole.name ?? grant.name}`,
+          detail: grant.inherited ? inheritedLabel(grant) : "Explicit role assignment",
+          privileges: grant.privileges,
+          inherited: grant.inherited
+        });
+      }
+    }
+  });
+  return entries;
+}
+
+function aggregateEffectivePrivileges(entries: EffectiveAccessEntry[]): EffectivePrivilege[] {
+  const privileges = new Map<string, boolean>();
+  entries.forEach((entry) => {
+    entry.privileges.forEach((privilege) => {
+      const currentInherited = privileges.get(privilege);
+      privileges.set(privilege, currentInherited === undefined ? entry.inherited : currentInherited && entry.inherited);
+    });
+  });
+  return Array.from(privileges.entries())
+    .map(([privilege, inherited]) => ({ privilege, inherited }))
+    .sort((left, right) => left.privilege.localeCompare(right.privilege));
+}
+
+function principalMatchesUser(grant: NormalizedGrant, user: RbacUser) {
+  const userKeys = [user.id, user.name, user.email].map(normalizePrincipalKey).filter(Boolean);
+  const grantKeys = [grant.id, grant.name].map(normalizePrincipalKey).filter(Boolean);
+  return grantKeys.some((key) => userKeys.includes(key));
+}
+
+function principalMatchesRole(grant: NormalizedGrant, role: PrincipalRef) {
+  const roleKeys = [role.id, role.name].map(normalizePrincipalKey).filter(Boolean);
+  const grantKeys = [grant.id, grant.name].map(normalizePrincipalKey).filter(Boolean);
+  return grantKeys.some((key) => roleKeys.includes(key));
+}
+
+function normalizePrincipalKey(value: string | undefined) {
+  return value?.trim().toLowerCase();
+}
+
+function stringValue(value: unknown) {
+  return typeof value === "string" && value.trim() ? value.trim() : undefined;
 }
 
 function normalizePrivilegeList(value: unknown) {
@@ -606,11 +857,17 @@ function isExpandable(item: CatalogItem) {
 }
 
 function iconForItem(item: CatalogItem, expanded: boolean) {
-  const type = item.type.toUpperCase();
   const containerType = item.container_type?.toUpperCase() ?? "";
   const label = rawObjectTypeLabel(item).toUpperCase();
 
-  if (type === "SOURCE" || containerType === "SOURCE") {
+  if (isSourceItem(item)) {
+    const sourceKind = classifySource(item);
+    if (sourceKind === "s3") {
+      return Cloud;
+    }
+    if (sourceKind === "catalog") {
+      return Library;
+    }
     return Database;
   }
   if (containerType === "SPACE") {
@@ -635,12 +892,73 @@ function iconForItem(item: CatalogItem, expanded: boolean) {
 }
 
 function objectTypeLabel(item: CatalogItem) {
+  if (isSourceItem(item)) {
+    return sourceTypeLabel(item);
+  }
   const label = rawObjectTypeLabel(item);
-  return label.toUpperCase() === "SOURCE" ? "Catalog" : label;
+  return titleCase(label);
 }
 
 function rawObjectTypeLabel(item: CatalogItem) {
   return item.container_type ?? item.type;
+}
+
+function isSourceItem(item: CatalogItem) {
+  return item.type.toUpperCase() === "SOURCE" || item.container_type?.toUpperCase() === "SOURCE";
+}
+
+function sourceTypeLabel(item: CatalogItem) {
+  const sourceType = item.source_type?.trim();
+  const sourceKind = classifySource(item);
+  if (sourceKind === "catalog") {
+    return "Catalog";
+  }
+  if (sourceKind === "s3") {
+    return "S3";
+  }
+  if (sourceKind === "sql") {
+    return "SQL";
+  }
+  return sourceType ? titleCase(sourceType) : "Source";
+}
+
+function classifySource(item: CatalogItem): "catalog" | "s3" | "sql" | "source" {
+  const descriptor = `${item.source_type ?? ""} ${displayName(item)}`.toUpperCase();
+  if (/\bS3\b|AMAZON_S3|AWS_S3/.test(descriptor)) {
+    return "s3";
+  }
+  if (
+    descriptor.includes("OPEN_CATALOG") ||
+    descriptor.includes("OPENCATALOG") ||
+    descriptor.includes("NESSIE") ||
+    descriptor.includes("ARCTIC") ||
+    descriptor.includes("CATALOG")
+  ) {
+    return "catalog";
+  }
+  if (
+    descriptor.includes("SQL") ||
+    descriptor.includes("JDBC") ||
+    descriptor.includes("POSTGRES") ||
+    descriptor.includes("MYSQL") ||
+    descriptor.includes("MSSQL") ||
+    descriptor.includes("ORACLE") ||
+    descriptor.includes("SNOWFLAKE") ||
+    descriptor.includes("REDSHIFT") ||
+    descriptor.includes("BIGQUERY") ||
+    descriptor.includes("TERADATA") ||
+    descriptor.includes("DB2")
+  ) {
+    return "sql";
+  }
+  return "source";
+}
+
+function titleCase(value: string) {
+  return value
+    .replace(/[_-]+/g, " ")
+    .toLowerCase()
+    .replace(/\b\w/g, (letter) => letter.toUpperCase());
 }
 
 function displayName(item: CatalogItem) {

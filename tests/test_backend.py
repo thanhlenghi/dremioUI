@@ -177,6 +177,20 @@ def test_catalog_returns_items_for_session() -> None:
     assert response.json()["items"][0]["id"] == "src"
 
 
+def test_catalog_item_preserves_source_type() -> None:
+    item = DremioClient._catalog_item(
+        {
+            "id": "source-id",
+            "path": ["lake"],
+            "type": "CONTAINER",
+            "containerType": "SOURCE",
+            "sourceConfig": {"type": "S3"},
+        }
+    )
+
+    assert item.source_type == "S3"
+
+
 def test_qna_returns_draft_sql() -> None:
     async def current_session() -> UserSession:
         return UserSession(user_id="allowed@example.org", dremio_token="token")

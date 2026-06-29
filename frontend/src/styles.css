@@ -457,6 +457,29 @@ h3 {
   gap: 8px;
 }
 
+.effective-access-control {
+  align-items: center;
+  display: grid;
+  gap: 6px;
+  grid-template-columns: 72px minmax(0, 1fr);
+}
+
+.effective-access-control span {
+  color: #657289;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.effective-access-control select {
+  min-width: 0;
+}
+
+.effective-access-card,
+.effective-access-breakdown {
+  display: grid;
+  gap: 8px;
+}
+
 .rbac-grant {
   border: 1px solid #dce2ea;
   border-radius: 6px;

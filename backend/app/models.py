@@ -19,6 +19,7 @@ class CatalogItem(BaseModel):
     type: str
     tag: str | None = None
     container_type: str | None = None
+    source_type: str | None = None
 
 
 class CatalogChildrenResponse(BaseModel):

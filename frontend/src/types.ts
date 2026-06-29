@@ -9,6 +9,7 @@ export type CatalogItem = {
   type: string;
   tag?: string | null;
   container_type?: string | null;
+  source_type?: string | null;
 };
 
 export type ObjectDetails = {
