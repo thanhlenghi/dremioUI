@@ -12,7 +12,7 @@ class Settings(BaseSettings):
     session_secret: str = "change-me"
     redis_url: str | None = "redis://localhost:6379/0"
     openai_api_key: str | None = None
-    openai_model: str = "gpt-4.1-mini"
+    openai_model: str = "gpt-5.4-mini"
     cors_origins: list[str] = Field(default_factory=lambda: ["http://localhost:5173"])
 
     @field_validator("app_allowlist", "cors_origins", mode="before")

@@ -54,7 +54,7 @@ On `gpu02.pdmz.eea`, provide environment values and start:
 docker compose up --build -d
 ```
 
-By default, the frontend is exposed on `http://<host>:8080`. Change with `WEB_PORT`.
+By default, the frontend is exposed on `http://<host>:8888`. Change with `WEB_PORT`.
 
 TLS is intentionally not included yet. Treat the first deployment as internal/testing only until Nginx or another reverse proxy terminates HTTPS.
 
