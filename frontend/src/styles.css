@@ -149,6 +149,13 @@ th {
   grid-template-columns: minmax(280px, 400px) minmax(0, 1fr);
 }
 
+.catalog-layout {
+  display: grid;
+  gap: 0;
+  grid-template-columns: minmax(360px, 42%) minmax(360px, 1fr);
+  min-height: calc(100vh - 48px);
+}
+
 .panel,
 .login-panel {
   background: #ffffff;
@@ -198,30 +205,6 @@ h3 {
   padding-left: 0;
 }
 
-.object-list {
-  display: grid;
-  gap: 6px;
-  max-height: calc(100vh - 190px);
-  overflow: auto;
-}
-
-.object-row {
-  align-items: flex-start;
-  display: grid;
-  gap: 3px;
-  justify-items: start;
-  text-align: left;
-}
-
-.object-row small {
-  color: #657289;
-}
-
-.object-row.selected {
-  border-color: #1f7a8c;
-  box-shadow: inset 3px 0 0 #1f7a8c;
-}
-
 .metric-row {
   display: grid;
   gap: 10px;
@@ -255,6 +238,192 @@ h3 {
 .compact-list button {
   max-width: 100%;
   overflow-wrap: anywhere;
+}
+
+.catalog-browser,
+.info-panel {
+  background: #ffffff;
+  border: 1px solid #dce2ea;
+  min-width: 0;
+}
+
+.catalog-browser {
+  border-radius: 8px 0 0 8px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.info-panel {
+  border-left: 0;
+  border-radius: 0 8px 8px 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.catalog-header,
+.info-panel-header {
+  align-items: center;
+  border-bottom: 1px solid #e0e5ec;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+  min-height: 72px;
+  padding: 14px 16px;
+}
+
+.catalog-header h2,
+.info-panel-header h2 {
+  font-size: 18px;
+  margin: 0;
+}
+
+.catalog-header span,
+.info-panel-header span {
+  color: #657289;
+  display: block;
+  font-size: 12px;
+  margin-top: 3px;
+  overflow-wrap: anywhere;
+}
+
+.catalog-search {
+  border-bottom: 1px solid #e0e5ec;
+  margin: 0;
+  padding: 8px 14px;
+}
+
+.tree-shell {
+  flex: 1;
+  overflow: auto;
+  padding: 8px 0;
+}
+
+.tree-status,
+.tree-empty {
+  color: #657289;
+  font-size: 13px;
+  padding: 10px 16px;
+}
+
+.tree-row {
+  align-items: center;
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr);
+  min-height: 34px;
+  padding-right: 8px;
+}
+
+.tree-row:hover {
+  background: #f2f6fa;
+}
+
+.tree-row.selected {
+  background: #e8f3f6;
+  box-shadow: inset 3px 0 0 #1f7a8c;
+}
+
+.tree-toggle,
+.tree-label {
+  border: 0;
+  background: transparent;
+  min-height: 30px;
+  padding: 0;
+}
+
+.tree-toggle {
+  color: #657289;
+  width: 28px;
+}
+
+.tree-toggle:disabled {
+  opacity: 1;
+}
+
+.tree-label {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: 18px minmax(0, 1fr) auto;
+  justify-content: stretch;
+  text-align: left;
+  width: 100%;
+}
+
+.tree-label span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tree-label small {
+  color: #657289;
+  font-size: 11px;
+  justify-self: end;
+  max-width: 100px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.tree-spacer {
+  display: block;
+  height: 15px;
+  width: 15px;
+}
+
+.tree-empty {
+  padding-bottom: 6px;
+  padding-top: 4px;
+}
+
+.info-panel-icon {
+  align-items: center;
+  background: #eef2f6;
+  border: 1px solid #dce2ea;
+  border-radius: 6px;
+  color: #1f7a8c;
+  display: flex;
+  flex: 0 0 auto;
+  height: 34px;
+  justify-content: center;
+  width: 34px;
+}
+
+.info-panel-header {
+  justify-content: flex-start;
+}
+
+.info-panel-body {
+  display: grid;
+  gap: 12px;
+  overflow: auto;
+  padding: 16px;
+}
+
+.admin-layout .tree-row {
+  padding-left: 8px;
+}
+
+.admin-header-actions {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+}
+
+.admin-tree-label {
+  grid-template-columns: 18px minmax(0, 1fr) minmax(64px, auto);
+}
+
+.spin {
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .login-screen,
@@ -351,8 +520,19 @@ h3 {
 
 @media (max-width: 920px) {
   .app-shell,
-  .page-grid {
+  .page-grid,
+  .catalog-layout {
     grid-template-columns: 1fr;
+  }
+
+  .catalog-browser,
+  .info-panel {
+    border-radius: 8px;
+  }
+
+  .info-panel {
+    border-left: 1px solid #dce2ea;
+    border-top: 0;
   }
 
   .sidebar {

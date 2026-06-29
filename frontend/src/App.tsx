@@ -1,14 +1,22 @@
 import {
   Bot,
+  ChevronDown,
+  ChevronRight,
   Database,
+  File,
+  Folder,
+  FolderOpen,
   Gauge,
   History,
+  Info,
   KeyRound,
+  Loader2,
   LogOut,
   Play,
   RefreshCw,
   Search,
   Shield,
+  Table2,
   Users
 } from "lucide-react";
 import { FormEvent, useEffect, useMemo, useState } from "react";
@@ -158,105 +166,298 @@ function CatalogView({
   selectedObject: CatalogItem | null;
   onSelect: (item: CatalogItem) => void;
 }) {
-  const [items, setItems] = useState<CatalogItem[]>([]);
-  const [children, setChildren] = useState<CatalogItem[]>([]);
+  const [rootItems, setRootItems] = useState<CatalogItem[]>([]);
+  const [childrenById, setChildrenById] = useState<Record<string, CatalogItem[]>>({});
+  const [expandedIds, setExpandedIds] = useState<Set<string>>(() => new Set());
+  const [loadingChildrenIds, setLoadingChildrenIds] = useState<Set<string>>(() => new Set());
   const [details, setDetails] = useState<ObjectDetails | null>(null);
+  const [detailsLoading, setDetailsLoading] = useState(false);
   const [filter, setFilter] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
-  useEffect(() => {
+  async function loadRoot() {
     setLoading(true);
+    setError("");
+    setChildrenById({});
+    setExpandedIds(new Set());
     api
       .catalogRoot()
-      .then((response) => setItems(response.items))
+      .then((response) => setRootItems(response.items))
       .catch((err) => setError(err instanceof Error ? err.message : "Could not load catalog"))
       .finally(() => setLoading(false));
+  }
+
+  useEffect(() => {
+    loadRoot();
   }, []);
 
   useEffect(() => {
     if (!selectedObject) {
+      setDetails(null);
       return;
     }
+    setDetailsLoading(true);
     setError("");
     api
       .objectDetails(selectedObject.id)
       .then(setDetails)
-      .catch((err) => setError(err instanceof Error ? err.message : "Could not load object"));
-    api
-      .catalogChildren(selectedObject.id)
-      .then((response) => setChildren(response.items))
-      .catch(() => setChildren([]));
+      .catch((err) => setError(err instanceof Error ? err.message : "Could not load object"))
+      .finally(() => setDetailsLoading(false));
   }, [selectedObject]);
 
-  const filtered = useMemo(() => {
-    const term = filter.toLowerCase();
-    return items.filter((item) => item.path.join(".").toLowerCase().includes(term));
-  }, [filter, items]);
+  async function toggleNode(item: CatalogItem) {
+    if (!isExpandable(item)) {
+      return;
+    }
+    const next = new Set(expandedIds);
+    if (next.has(item.id)) {
+      next.delete(item.id);
+      setExpandedIds(next);
+      return;
+    }
+    next.add(item.id);
+    setExpandedIds(next);
+    if (childrenById[item.id]) {
+      return;
+    }
+
+    setLoadingChildrenIds((current) => new Set(current).add(item.id));
+    try {
+      const response = await api.catalogChildren(item.id);
+      setChildrenById((current) => ({ ...current, [item.id]: response.items }));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not load child objects");
+      setChildrenById((current) => ({ ...current, [item.id]: [] }));
+    } finally {
+      setLoadingChildrenIds((current) => {
+        const nextLoading = new Set(current);
+        nextLoading.delete(item.id);
+        return nextLoading;
+      });
+    }
+  }
+
+  const visibleRoots = useMemo(
+    () => filterTree(rootItems, childrenById, filter),
+    [childrenById, filter, rootItems]
+  );
 
   return (
-    <section className="page-grid">
-      <div className="panel browser-panel">
-        <div className="toolbar">
-          <h2>Catalog</h2>
-          <button type="button" onClick={() => api.catalogRoot().then((r) => setItems(r.items))}>
+    <section className="catalog-layout">
+      <div className="catalog-browser">
+        <div className="catalog-header">
+          <div>
+            <h2>Catalog</h2>
+            <span>{rootItems.length} root objects</span>
+          </div>
+          <button type="button" onClick={loadRoot} title="Refresh catalog">
             <RefreshCw size={16} />
           </button>
         </div>
-        <label className="search-box">
+        <label className="search-box catalog-search">
           <Search size={16} />
           <input
-            placeholder="Filter sources and spaces"
+            placeholder="Filter loaded objects"
             value={filter}
             onChange={(event) => setFilter(event.target.value)}
           />
         </label>
-        {loading && <div className="muted">Loading catalog</div>}
         {error && <div className="error">{error}</div>}
-        <div className="object-list">
-          {filtered.map((item) => (
-            <button
+        <div className="tree-shell">
+          {loading && <div className="tree-status">Loading catalog</div>}
+          {!loading && visibleRoots.length === 0 && (
+            <div className="tree-status">No loaded objects match the filter.</div>
+          )}
+          {visibleRoots.map((item) => (
+            <CatalogTreeNode
               key={item.id}
-              type="button"
-              className={selectedObject?.id === item.id ? "object-row selected" : "object-row"}
-              onClick={() => onSelect(item)}
-            >
-              <span>{item.path.join(".") || item.id}</span>
-              <small>{item.type}</small>
-            </button>
+              item={item}
+              depth={0}
+              selectedId={selectedObject?.id}
+              childrenById={childrenById}
+              expandedIds={expandedIds}
+              loadingChildrenIds={loadingChildrenIds}
+              filter={filter}
+              onSelect={onSelect}
+              onToggle={toggleNode}
+            />
           ))}
         </div>
       </div>
 
-      <div className="panel details-panel">
-        <h2>{selectedObject ? selectedObject.path.join(".") || selectedObject.id : "Select an object"}</h2>
+      <aside className="info-panel">
+        <div className="info-panel-header">
+          <div className="info-panel-icon">
+            <Info size={18} />
+          </div>
+          <div>
+            <h2>{selectedObject ? displayName(selectedObject) : "Object Info"}</h2>
+            <span>{selectedObject ? selectedObject.path.join(".") : "Select an object in the tree"}</span>
+          </div>
+        </div>
         {selectedObject ? (
-          <>
+          <div className="info-panel-body">
             <div className="metric-row">
-              <InfoPill label="Type" value={selectedObject.type} />
+              <InfoPill label="Type" value={objectTypeLabel(selectedObject)} />
               <InfoPill label="ID" value={selectedObject.id} />
               <InfoPill label="Tag" value={selectedObject.tag ?? "None"} />
             </div>
-            <h3>Children</h3>
-            <div className="compact-list">
-              {children.length === 0 && <span className="muted">No child objects visible</span>}
-              {children.map((child) => (
-                <button key={child.id} type="button" onClick={() => onSelect(child)}>
-                  {child.path.join(".") || child.id}
-                </button>
-              ))}
-            </div>
+            {detailsLoading && <div className="muted">Loading metadata</div>}
             <h3>Metadata</h3>
             <pre>{JSON.stringify(details?.raw ?? {}, null, 2)}</pre>
             <h3>RBAC</h3>
-            <pre>{JSON.stringify(details?.permissions ?? { status: "No permission details returned" }, null, 2)}</pre>
-          </>
+            <pre>
+              {JSON.stringify(
+                details?.permissions ?? { status: "No permission details returned" },
+                null,
+                2
+              )}
+            </pre>
+          </div>
         ) : (
-          <div className="empty-state">Choose a source, space, folder, dataset, or view.</div>
+          <div className="empty-state">Choose a source, folder, dataset, or view.</div>
         )}
-      </div>
+      </aside>
     </section>
   );
+}
+
+function CatalogTreeNode({
+  item,
+  depth,
+  selectedId,
+  childrenById,
+  expandedIds,
+  loadingChildrenIds,
+  filter,
+  onSelect,
+  onToggle
+}: {
+  item: CatalogItem;
+  depth: number;
+  selectedId: string | undefined;
+  childrenById: Record<string, CatalogItem[]>;
+  expandedIds: Set<string>;
+  loadingChildrenIds: Set<string>;
+  filter: string;
+  onSelect: (item: CatalogItem) => void;
+  onToggle: (item: CatalogItem) => void;
+}) {
+  const expanded = expandedIds.has(item.id);
+  const loading = loadingChildrenIds.has(item.id);
+  const expandable = isExpandable(item);
+  const children = filterTree(childrenById[item.id] ?? [], childrenById, filter);
+  const Icon = iconForItem(item, expanded);
+
+  return (
+    <div className="tree-node">
+      <div
+        className={selectedId === item.id ? "tree-row selected" : "tree-row"}
+        style={{ paddingLeft: `${depth * 18 + 8}px` }}
+      >
+        <button
+          className="tree-toggle"
+          type="button"
+          onClick={() => onToggle(item)}
+          disabled={!expandable}
+          title={expanded ? "Collapse" : "Expand"}
+        >
+          {loading ? (
+            <Loader2 className="spin" size={15} />
+          ) : expandable ? (
+            expanded ? (
+              <ChevronDown size={15} />
+            ) : (
+              <ChevronRight size={15} />
+            )
+          ) : (
+            <span className="tree-spacer" />
+          )}
+        </button>
+        <button className="tree-label" type="button" onClick={() => onSelect(item)}>
+          <Icon size={17} />
+          <span>{displayName(item)}</span>
+          <small>{objectTypeLabel(item)}</small>
+        </button>
+      </div>
+      {expanded && children.length > 0 && (
+        <div className="tree-children">
+          {children.map((child) => (
+            <CatalogTreeNode
+              key={child.id}
+              item={child}
+              depth={depth + 1}
+              selectedId={selectedId}
+              childrenById={childrenById}
+              expandedIds={expandedIds}
+              loadingChildrenIds={loadingChildrenIds}
+              filter={filter}
+              onSelect={onSelect}
+              onToggle={onToggle}
+            />
+          ))}
+        </div>
+      )}
+      {expanded && childrenById[item.id]?.length === 0 && !loading && (
+        <div className="tree-empty" style={{ paddingLeft: `${(depth + 1) * 18 + 36}px` }}>
+          No visible children
+        </div>
+      )}
+    </div>
+  );
+}
+
+function isExpandable(item: CatalogItem) {
+  const type = item.type.toUpperCase();
+  const containerType = item.container_type?.toUpperCase();
+  return (
+    type === "CONTAINER" ||
+    type === "SOURCE" ||
+    type === "SPACE" ||
+    type === "FOLDER" ||
+    containerType === "SOURCE" ||
+    containerType === "SPACE" ||
+    containerType === "FOLDER" ||
+    containerType === "HOME"
+  );
+}
+
+function iconForItem(item: CatalogItem, expanded: boolean) {
+  const label = objectTypeLabel(item).toUpperCase();
+  if (label.includes("SOURCE") || label.includes("SPACE") || label.includes("FOLDER")) {
+    return expanded ? FolderOpen : Folder;
+  }
+  if (label.includes("DATASET") || label.includes("TABLE") || label.includes("VIEW")) {
+    return Table2;
+  }
+  return File;
+}
+
+function objectTypeLabel(item: CatalogItem) {
+  return item.container_type ?? item.type;
+}
+
+function displayName(item: CatalogItem) {
+  return item.path.at(-1) ?? item.id;
+}
+
+function filterTree(
+  items: CatalogItem[],
+  childrenById: Record<string, CatalogItem[]>,
+  filter: string
+): CatalogItem[] {
+  const term = filter.trim().toLowerCase();
+  if (!term) {
+    return items;
+  }
+  return items.filter((item) => {
+    const ownMatch =
+      item.path.join(".").toLowerCase().includes(term) ||
+      objectTypeLabel(item).toLowerCase().includes(term);
+    const childMatch = filterTree(childrenById[item.id] ?? [], childrenById, filter).length > 0;
+    return ownMatch || childMatch;
+  });
 }
 
 function JobsView() {
@@ -401,28 +602,148 @@ function QnaView({ selectedObject }: { selectedObject: CatalogItem | null }) {
 
 function AdminList({ title, load }: { title: string; load: () => Promise<{ items: AdminItem[] }> }) {
   const [items, setItems] = useState<AdminItem[]>([]);
+  const [selectedItem, setSelectedItem] = useState<AdminItem | null>(null);
+  const [filter, setFilter] = useState("");
   const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
+
+  async function refresh() {
+    setLoading(true);
+    setError("");
+    try {
+      const response = await load();
+      setItems(response.items);
+      setSelectedItem((current) => current ?? response.items[0] ?? null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : `Could not load ${title}`);
+    } finally {
+      setLoading(false);
+    }
+  }
 
   useEffect(() => {
-    load()
-      .then((response) => setItems(response.items))
-      .catch((err) => setError(err instanceof Error ? err.message : `Could not load ${title}`));
+    refresh();
   }, [load, title]);
 
+  const filteredItems = useMemo(() => {
+    const term = filter.trim().toLowerCase();
+    if (!term) {
+      return items;
+    }
+    return items.filter((item) => JSON.stringify(item).toLowerCase().includes(term));
+  }, [filter, items]);
+
+  const Icon = adminIcon(title);
+
   return (
-    <section className="panel full-panel">
-      <div className="toolbar">
-        <h2>{title}</h2>
-        <span className="readonly">Read-only</span>
+    <section className="catalog-layout admin-layout">
+      <div className="catalog-browser">
+        <div className="catalog-header">
+          <div>
+            <h2>{title}</h2>
+            <span>{items.length} records</span>
+          </div>
+          <div className="admin-header-actions">
+            <span className="readonly">Read-only</span>
+            <button type="button" onClick={refresh} title={`Refresh ${title.toLowerCase()}`}>
+              <RefreshCw size={16} />
+            </button>
+          </div>
+        </div>
+        <label className="search-box catalog-search">
+          <Search size={16} />
+          <input
+            placeholder={`Filter ${title.toLowerCase()}`}
+            value={filter}
+            onChange={(event) => setFilter(event.target.value)}
+          />
+        </label>
+        {error && <div className="error">{error}</div>}
+        <div className="tree-shell">
+          {loading && <div className="tree-status">Loading {title.toLowerCase()}</div>}
+          {!loading && filteredItems.length === 0 && (
+            <div className="tree-status">No {title.toLowerCase()} match the filter.</div>
+          )}
+          {filteredItems.map((item, index) => (
+            <div
+              className={selectedItem === item ? "tree-row selected" : "tree-row"}
+              key={adminItemKey(item, index)}
+            >
+              <span className="tree-toggle">
+                <span className="tree-spacer" />
+              </span>
+              <button className="tree-label admin-tree-label" type="button" onClick={() => setSelectedItem(item)}>
+                <Icon size={17} />
+                <span>{adminItemName(item, title)}</span>
+                <small>{adminItemSubtitle(item)}</small>
+              </button>
+            </div>
+          ))}
+        </div>
       </div>
-      {error && <div className="error">{error}</div>}
-      <div className="json-grid">
-        {items.map((item, index) => (
-          <pre key={String(item.id ?? item.name ?? index)}>{JSON.stringify(item, null, 2)}</pre>
-        ))}
-      </div>
-      {items.length === 0 && !error && <div className="empty-state">No {title.toLowerCase()} returned.</div>}
+
+      <aside className="info-panel">
+        <div className="info-panel-header">
+          <div className="info-panel-icon">
+            <Icon size={18} />
+          </div>
+          <div>
+            <h2>{selectedItem ? adminItemName(selectedItem, title) : `${title} Info`}</h2>
+            <span>{selectedItem ? adminItemSubtitle(selectedItem) : `Select a ${title.toLowerCase()} record`}</span>
+          </div>
+        </div>
+        {selectedItem ? (
+          <div className="info-panel-body">
+            <div className="metric-row">
+              <InfoPill label="Name" value={adminItemName(selectedItem, title)} />
+              <InfoPill label="ID" value={String(selectedItem.id ?? "None")} />
+              <InfoPill label="Type" value={adminItemSubtitle(selectedItem)} />
+            </div>
+            <h3>Details</h3>
+            <pre>{JSON.stringify(selectedItem, null, 2)}</pre>
+          </div>
+        ) : (
+          <div className="empty-state">Choose a {title.toLowerCase()} record.</div>
+        )}
+      </aside>
     </section>
+  );
+}
+
+function adminIcon(title: string) {
+  if (title === "Users") {
+    return Users;
+  }
+  if (title === "Roles") {
+    return Shield;
+  }
+  return Gauge;
+}
+
+function adminItemKey(item: AdminItem, index: number) {
+  return String(item.id ?? item.name ?? item.email ?? index);
+}
+
+function adminItemName(item: AdminItem, fallback: string) {
+  return String(
+    item.name ??
+      item.userName ??
+      item.username ??
+      item.email ??
+      item.displayName ??
+      item.id ??
+      fallback
+  );
+}
+
+function adminItemSubtitle(item: AdminItem) {
+  return String(
+    item.type ??
+      item.identityType ??
+      item.status ??
+      item.state ??
+      item.engineState ??
+      "Record"
   );
 }
 

@@ -45,6 +45,8 @@ Pull requests should include a summary, testing performed, linked issues when ap
 
 Before editing, check whether generated or user-created files already exist and avoid overwriting them without approval. Prefer small, reviewable changes and update this guide as tooling becomes concrete.
 
+Always ask the user for explicit confirmation before committing changes or pushing to GitHub. Do not run `git commit` or `git push` without that approval, even if the user previously asked for commits or remote updates in the same session.
+
 ### Session Handoff Protocol
 
 Always check for `.agents-handoff.md` or `TODO.md` at the start of a session. If `.agents-handoff.md` exists, prioritize its instructions, execute the next step, then delete it once processed. Treat `TODO.md` as persistent context and do not delete it unless explicitly instructed. Keep code style concise; do not explain basic code blocks unless requested.

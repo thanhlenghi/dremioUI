@@ -14,7 +14,7 @@ export type CatalogItem = {
 export type ObjectDetails = {
   id: string;
   raw: Record<string, unknown>;
-  permissions?: Record<string, unknown> | null;
+  permissions?: Record<string, unknown> | unknown[] | null;
 };
 
 export type JobSummary = {
