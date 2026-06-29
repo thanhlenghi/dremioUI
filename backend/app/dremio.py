@@ -1,3 +1,4 @@
+import asyncio
 from typing import Any
 from urllib.parse import quote
 
@@ -11,10 +12,19 @@ class DremioError(RuntimeError):
 
 
 class DremioClient:
-    def __init__(self, base_url: str, token: str, timeout: float = 30.0) -> None:
+    def __init__(
+        self,
+        base_url: str,
+        token: str,
+        timeout: float = 30.0,
+        job_poll_attempts: int = 8,
+        job_poll_interval: float = 0.25,
+    ) -> None:
         self._base_url = base_url.rstrip("/")
         self._token = token
         self._timeout = timeout
+        self._job_poll_attempts = job_poll_attempts
+        self._job_poll_interval = job_poll_interval
 
     async def validate_token(self) -> dict[str, Any]:
         return await self._request("GET", "/api/v3/catalog")
@@ -68,9 +78,33 @@ class DremioClient:
             f"{max(1, min(limit, 200))}"
         )
         job_id = await self.submit_sql(sql)
-        data = await self.get_job_results(job_id, limit=limit)
+        data = await self._wait_for_job_results(job_id, limit=limit)
         rows = data.get("rows", data.get("data", []))
         return [self._job_summary(row) for row in rows]
+
+    async def _wait_for_job_results(self, job_id: str, limit: int) -> dict[str, Any]:
+        last_error: DremioError | None = None
+        for _ in range(getattr(self, "_job_poll_attempts", 8)):
+            try:
+                return await self.get_job_results(job_id, limit=limit)
+            except DremioError as exc:
+                if not self._is_transient_results_error(exc):
+                    raise
+                last_error = exc
+
+            job = await self.get_job(job_id)
+            state = str(
+                job.get("jobState")
+                or job.get("state")
+                or job.get("status")
+                or job.get("jobStatus")
+                or ""
+            ).upper()
+            if state in {"FAILED", "CANCELED", "CANCELLED"}:
+                raise DremioError(f"Dremio job {job_id} ended in {state}")
+            await asyncio.sleep(getattr(self, "_job_poll_interval", 0.25))
+
+        raise DremioError(f"Timed out waiting for Dremio job {job_id} results") from last_error
 
     async def list_users(self) -> list[dict[str, Any]]:
         payload = await self._request("GET", "/api/v3/user")
@@ -96,6 +130,11 @@ class DremioClient:
         if not response.content:
             return {}
         return response.json()
+
+    @staticmethod
+    def _is_transient_results_error(exc: DremioError) -> bool:
+        message = str(exc).upper()
+        return "METADATA_RETRIEVAL" in message or "NOT COMPLETED" in message or "RUNNING" in message
 
     @staticmethod
     def _catalog_item(item: dict[str, Any]) -> CatalogItem:

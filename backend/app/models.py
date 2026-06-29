@@ -28,7 +28,7 @@ class CatalogChildrenResponse(BaseModel):
 class ObjectDetailsResponse(BaseModel):
     id: str
     raw: dict[str, Any]
-    permissions: dict[str, Any] | None = None
+    permissions: dict[str, Any] | list[Any] | None = None
 
 
 class JobSummary(BaseModel):
