@@ -6,9 +6,11 @@ from openai import AsyncOpenAI
 from backend.app.models import JobSummary, QnaResponse
 
 
-SYSTEM_PROMPT = """You help administer Dremio from metadata and job history only.
+SYSTEM_PROMPT = """You help administer Dremio from metadata, RBAC provenance, and job history only.
 Never claim to have inspected table rows. If SQL is useful, provide a read-only SELECT draft.
-Do not suggest destructive admin changes. Cite catalog objects or job ids used in the answer."""
+Do not suggest destructive admin changes. For RBAC questions, explain direct grants,
+role-derived grants, inherited grants, and where each privilege was explicitly granted.
+Cite catalog objects or job ids used in the answer."""
 
 
 class QnaProvider(Protocol):
@@ -17,6 +19,7 @@ class QnaProvider(Protocol):
         question: str,
         catalog_object: dict[str, Any] | None,
         jobs: list[JobSummary],
+        rbac_context: dict[str, Any] | None = None,
     ) -> QnaResponse: ...
 
 
@@ -30,11 +33,19 @@ class OpenAIQnaProvider:
         question: str,
         catalog_object: dict[str, Any] | None,
         jobs: list[JobSummary],
+        rbac_context: dict[str, Any] | None = None,
     ) -> QnaResponse:
         context = {
             "catalog_object": catalog_object,
-            "jobs": [job.model_dump(exclude={"raw"}) | {"raw_keys": sorted(job.raw.keys())} for job in jobs],
-            "policy": "Only metadata, SQL text, status, timings, errors, and counts are present. No row data.",
+            "jobs": [
+                job.model_dump(exclude={"raw"}) | {"raw_keys": sorted(job.raw.keys())}
+                for job in jobs
+            ],
+            "rbac": rbac_context,
+            "policy": (
+                "Only metadata, SQL text, status, timings, errors, and counts are present. "
+                "No row data."
+            ),
         }
         response = await self._client.responses.create(
             model=self._model,
@@ -72,6 +83,7 @@ class DisabledQnaProvider:
         question: str,
         catalog_object: dict[str, Any] | None,
         jobs: list[JobSummary],
+        rbac_context: dict[str, Any] | None = None,
     ) -> QnaResponse:
         return QnaResponse(
             answer=(

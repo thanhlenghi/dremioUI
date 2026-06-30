@@ -60,6 +60,7 @@ class QnaRequest(BaseModel):
     question: str = Field(min_length=1)
     object_id: str | None = None
     job_ids: list[str] = Field(default_factory=list)
+    rbac_user_id: str | None = None
 
 
 class QnaResponse(BaseModel):
@@ -70,3 +71,33 @@ class QnaResponse(BaseModel):
 
 class AdminListResponse(BaseModel):
     items: list[dict[str, Any]]
+
+
+class RbacPrincipal(BaseModel):
+    id: str | None = None
+    name: str | None = None
+    email: str | None = None
+
+
+class RbacGrantExplanation(BaseModel):
+    privilege: str
+    source: str
+    grantee_type: str
+    grantee_id: str | None = None
+    grantee_name: str | None = None
+    grant_object_id: str
+    grant_object_path: list[str]
+    inherited: bool
+    explicit: bool = True
+    via_role_id: str | None = None
+    via_role_name: str | None = None
+
+
+class RbacExplanationResponse(BaseModel):
+    object_id: str
+    object_path: list[str]
+    user: RbacPrincipal
+    roles: list[RbacPrincipal] = Field(default_factory=list)
+    effective_privileges: list[str] = Field(default_factory=list)
+    grants: list[RbacGrantExplanation] = Field(default_factory=list)
+    unresolved: list[str] = Field(default_factory=list)

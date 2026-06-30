@@ -37,6 +37,37 @@ class DremioClient:
         payload = await self.get_catalog_object(catalog_id)
         return [self._catalog_item(item) for item in payload.get("children", [])]
 
+    async def resolve_catalog_path(self, path: list[str], selected_id: str) -> list[CatalogItem]:
+        if not path:
+            return [
+                CatalogItem(
+                    id=selected_id,
+                    path=[],
+                    type="unknown",
+                )
+            ]
+
+        resolved: list[CatalogItem] = []
+        siblings = await self.list_catalog_root()
+        for index, segment in enumerate(path):
+            expected_path = path[: index + 1]
+            match = self._match_catalog_segment(siblings, expected_path, segment)
+            if not match:
+                break
+            resolved.append(match)
+            if index < len(path) - 1:
+                siblings = await self.list_catalog_children(match.id)
+
+        if not resolved or resolved[-1].id != selected_id:
+            resolved.append(
+                CatalogItem(
+                    id=selected_id,
+                    path=path,
+                    type="unknown",
+                )
+            )
+        return resolved
+
     async def get_catalog_object(self, catalog_id: str) -> dict[str, Any]:
         encoded = quote(catalog_id, safe="")
         return await self._request("GET", f"/api/v3/catalog/{encoded}", params={"maxChildren": 200})
@@ -159,6 +190,20 @@ class DremioClient:
             container_type=item.get("containerType"),
             source_type=DremioClient._source_type(item),
         )
+
+    @staticmethod
+    def _match_catalog_segment(
+        items: list[CatalogItem],
+        expected_path: list[str],
+        segment: str,
+    ) -> CatalogItem | None:
+        for item in items:
+            if item.path == expected_path:
+                return item
+        for item in items:
+            if item.path and item.path[-1] == segment:
+                return item
+        return None
 
     @staticmethod
     def _source_type(item: dict[str, Any]) -> str | None:

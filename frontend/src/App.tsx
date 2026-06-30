@@ -1046,6 +1046,7 @@ function JobsView() {
 
 function QnaView({ selectedObject }: { selectedObject: CatalogItem | null }) {
   const [question, setQuestion] = useState("");
+  const [rbacUserId, setRbacUserId] = useState("");
   const [sql, setSql] = useState("");
   const [answer, setAnswer] = useState<QnaResponse | null>(null);
   const [jobId, setJobId] = useState("");
@@ -1056,7 +1057,12 @@ function QnaView({ selectedObject }: { selectedObject: CatalogItem | null }) {
     setLoading(true);
     setError("");
     try {
-      const response = await api.qna(question, selectedObject?.id);
+      const response = await api.qna(
+        question,
+        selectedObject?.id,
+        [],
+        rbacUserId.trim() || undefined
+      );
       setAnswer(response);
       if (response.draft_sql) {
         setSql(response.draft_sql);
@@ -1093,6 +1099,14 @@ function QnaView({ selectedObject }: { selectedObject: CatalogItem | null }) {
           onChange={(event) => setQuestion(event.target.value)}
           placeholder="Ask about metadata, recent jobs, or draft a read-only query"
         />
+        <label>
+          RBAC user or email
+          <input
+            value={rbacUserId}
+            onChange={(event) => setRbacUserId(event.target.value)}
+            placeholder="Optional, for permission provenance questions"
+          />
+        </label>
         <button type="button" onClick={ask} disabled={loading || !question.trim()}>
           <Bot size={16} />
           Ask

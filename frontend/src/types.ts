@@ -34,4 +34,34 @@ export type QnaResponse = {
   citations: string[];
 };
 
+export type RbacExplanation = {
+  object_id: string;
+  object_path: string[];
+  user: {
+    id?: string | null;
+    name?: string | null;
+    email?: string | null;
+  };
+  roles: Array<{
+    id?: string | null;
+    name?: string | null;
+    email?: string | null;
+  }>;
+  effective_privileges: string[];
+  grants: Array<{
+    privilege: string;
+    source: string;
+    grantee_type: string;
+    grantee_id?: string | null;
+    grantee_name?: string | null;
+    grant_object_id: string;
+    grant_object_path: string[];
+    inherited: boolean;
+    explicit: boolean;
+    via_role_id?: string | null;
+    via_role_name?: string | null;
+  }>;
+  unresolved: string[];
+};
+
 export type AdminItem = Record<string, unknown>;

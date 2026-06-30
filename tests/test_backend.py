@@ -4,10 +4,15 @@ from typing import Any
 from fastapi.testclient import TestClient
 
 from backend.app.config import Settings, get_settings
-from backend.app.dependencies import get_current_session, get_dremio_client, get_qna_provider, get_session_store
+from backend.app.dependencies import (
+    get_current_session,
+    get_dremio_client,
+    get_qna_provider,
+    get_session_store,
+)
 from backend.app.main import app
 from backend.app.dremio import DremioClient, DremioError
-from backend.app.models import JobSummary, QnaResponse
+from backend.app.models import CatalogItem, JobSummary, QnaResponse
 from backend.app.session_store import MemorySessionStore, UserSession
 
 
@@ -56,6 +61,7 @@ class FakeQnaProvider:
         question: str,
         catalog_object: dict[str, Any] | None,
         jobs: list[JobSummary],
+        rbac_context: dict[str, Any] | None = None,
     ) -> QnaResponse:
         return QnaResponse(
             answer=f"Answered: {question}",
@@ -108,6 +114,58 @@ class FakeTransientJobsDremioClient(DremioClient):
 class FakeFailingJobsDremioClient(FakeDremioClient):
     async def list_recent_jobs(self, limit: int = 50):
         raise DremioError("Dremio 400: transient job-state failure")
+
+
+class FakeRbacDremioClient(FakeDremioClient):
+    async def get_catalog_object(self, catalog_id: str):
+        return {"id": catalog_id, "path": ["src", "folder", "table"]}
+
+    async def resolve_catalog_path(self, path: list[str], selected_id: str):
+        return [
+            CatalogItem(id="src-id", path=["src"], type="SOURCE"),
+            CatalogItem(id="folder-id", path=["src", "folder"], type="FOLDER"),
+            CatalogItem(id=selected_id, path=path, type="DATASET"),
+        ]
+
+    async def get_catalog_permissions(self, catalog_id: str):
+        grants = {
+            "src-id": [
+                {
+                    "granteeType": "ROLE",
+                    "id": "r1",
+                    "name": "Reader",
+                    "privileges": ["READ_METADATA"],
+                }
+            ],
+            "folder-id": [
+                {
+                    "granteeType": "ROLE",
+                    "id": "r1",
+                    "name": "Reader",
+                    "privileges": ["SELECT"],
+                }
+            ],
+            "table-id": [
+                {
+                    "granteeType": "USER",
+                    "id": "u1",
+                    "name": "Analyst",
+                    "email": "analyst@example.org",
+                    "privileges": ["READ"],
+                }
+            ],
+        }
+        return {"effectivePermissions": [], "grants": grants.get(catalog_id, [])}
+
+    async def list_users(self):
+        return [
+            {
+                "id": "u1",
+                "name": "Analyst",
+                "email": "analyst@example.org",
+                "roles": [{"id": "r1", "name": "Reader"}],
+            }
+        ]
 
 
 def client(*, mock_dremio: bool = False) -> AsyncIterator[TestClient]:
@@ -227,6 +285,41 @@ def test_catalog_object_accepts_list_permissions() -> None:
         "READ",
         "SELECT",
     ]
+
+
+def test_rbac_explain_returns_direct_and_inherited_role_grants() -> None:
+    async def current_session() -> UserSession:
+        return UserSession(user_id="allowed@example.org", dremio_token="token")
+
+    app.dependency_overrides[get_current_session] = current_session
+    app.dependency_overrides[get_dremio_client] = lambda: FakeRbacDremioClient()
+    try:
+        for test_client in client():
+            response = test_client.get(
+                "/api/rbac/explain",
+                params={"object_id": "table-id", "user_id": "analyst@example.org"},
+            )
+    finally:
+        app.dependency_overrides.pop(get_current_session, None)
+        app.dependency_overrides.pop(get_dremio_client, None)
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["effective_privileges"] == ["READ", "READ_METADATA", "SELECT"]
+    assert payload["roles"] == [{"id": "r1", "name": "Reader", "email": None}]
+    assert {
+        (
+            grant["privilege"],
+            grant["source"],
+            ".".join(grant["grant_object_path"]),
+            grant["inherited"],
+        )
+        for grant in payload["grants"]
+    } == {
+        ("READ_METADATA", "role", "src", True),
+        ("SELECT", "role", "src.folder", True),
+        ("READ", "direct", "src.folder.table", False),
+    }
 
 
 async def test_recent_jobs_retries_transient_metadata_retrieval() -> None:

@@ -4,6 +4,7 @@ import type {
   JobSummary,
   ObjectDetails,
   QnaResponse,
+  RbacExplanation,
   SessionResponse
 } from "./types";
 
@@ -45,11 +46,20 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ sql, context })
     }),
-  qna: (question: string, objectId?: string, jobIds: string[] = []) =>
+  qna: (question: string, objectId?: string, jobIds: string[] = [], rbacUserId?: string) =>
     request<QnaResponse>("/api/qna", {
       method: "POST",
-      body: JSON.stringify({ question, object_id: objectId, job_ids: jobIds })
+      body: JSON.stringify({
+        question,
+        object_id: objectId,
+        job_ids: jobIds,
+        rbac_user_id: rbacUserId
+      })
     }),
+  explainRbac: (objectId: string, userId: string) =>
+    request<RbacExplanation>(
+      `/api/rbac/explain?object_id=${encodeURIComponent(objectId)}&user_id=${encodeURIComponent(userId)}`
+    ),
   users: () => request<{ items: AdminItem[] }>("/api/admin/users"),
   roles: () => request<{ items: AdminItem[] }>("/api/admin/roles"),
   engines: () => request<{ items: AdminItem[] }>("/api/admin/engines")

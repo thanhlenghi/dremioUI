@@ -24,11 +24,13 @@ from backend.app.models import (
     ObjectDetailsResponse,
     QnaRequest,
     QnaResponse,
+    RbacExplanationResponse,
     SessionResponse,
     SqlRequest,
     SqlResponse,
 )
 from backend.app.qna import QnaProvider
+from backend.app.rbac import explain_rbac_access
 from backend.app.session_store import SessionStore, UserSession
 
 
@@ -107,7 +109,9 @@ async def session_status(session: UserSession = Depends(get_current_session)) ->
 
 
 @app.get("/api/catalog", response_model=CatalogChildrenResponse)
-async def catalog_root(client: DremioClient = Depends(get_dremio_client)) -> CatalogChildrenResponse:
+async def catalog_root(
+    client: DremioClient = Depends(get_dremio_client),
+) -> CatalogChildrenResponse:
     return CatalogChildrenResponse(items=await client.list_catalog_root())
 
 
@@ -148,9 +152,28 @@ async def qna(
     client: DremioClient = Depends(get_dremio_client),
     provider: QnaProvider = Depends(get_qna_provider),
 ) -> QnaResponse:
-    catalog_object = await client.get_catalog_object(request.object_id) if request.object_id else None
-    jobs = [DremioClient._job_summary(await client.get_job(job_id)) for job_id in request.job_ids[:10]]
-    return await provider.answer(request.question, catalog_object, jobs)
+    catalog_object = (
+        await client.get_catalog_object(request.object_id) if request.object_id else None
+    )
+    jobs = [
+        DremioClient._job_summary(await client.get_job(job_id))
+        for job_id in request.job_ids[:10]
+    ]
+    rbac_context = None
+    if request.object_id and request.rbac_user_id:
+        rbac_context = (
+            await explain_rbac_access(client, request.object_id, request.rbac_user_id)
+        ).model_dump()
+    return await provider.answer(request.question, catalog_object, jobs, rbac_context)
+
+
+@app.get("/api/rbac/explain", response_model=RbacExplanationResponse)
+async def rbac_explain(
+    object_id: str,
+    user_id: str,
+    client: DremioClient = Depends(get_dremio_client),
+) -> RbacExplanationResponse:
+    return await explain_rbac_access(client, object_id, user_id)
 
 
 @app.get("/api/admin/users", response_model=AdminListResponse)
