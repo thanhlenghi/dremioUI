@@ -100,15 +100,27 @@ describe("App", () => {
     expect(screen.getByText("View")).toBeInTheDocument();
     expect(screen.getByText("Table")).toBeInTheDocument();
     expect(screen.getByText("CSV File")).toBeInTheDocument();
+    expectCatalogIcon("s3-source", "lucide-cloud");
+    expectCatalogIcon("sql-source", "lucide-server");
+    expectCatalogIcon("orders_view", "lucide-eye");
+    expectCatalogIcon("orders_table", "lucide-table2");
+    expectCatalogIcon("sales.csv", "lucide-file-spreadsheet");
   });
 
-  it("labels Dremio source metadata with plugin type as an S3 source", async () => {
+  it("renders raw Dremio source metadata with plugin type as an S3 source", async () => {
     mockAuthenticatedFetch({
       catalogItems: [
         {
           id: "657e7168-3019-440f-a1da-7f7820c92c0c",
-          path: ["local_s3"],
-          type: "S3"
+          entityType: "source",
+          type: "S3",
+          name: "local_s3",
+          config: {
+            propertyList: [
+              { name: "fs.s3a.endpoint", value: "s3datahub.rstorage.eea:443" },
+              { name: "dremio.s3.compat", value: "true" }
+            ]
+          }
         }
       ]
     });
@@ -118,13 +130,14 @@ describe("App", () => {
     expect(screen.getByText("S3")).toBeInTheDocument();
     expect(screen.queryByText("File")).not.toBeInTheDocument();
     expect(document.querySelector(".catalog-icon.source-s3")).toBeInTheDocument();
+    expectCatalogIcon("local_s3", "lucide-cloud");
   });
 
   it("shows started and off engine lights in the engine info pane", async () => {
     mockAuthenticatedFetch({
       engineItems: [
-        { id: "hot", name: "Hot engine", status: "STARTED" },
-        { id: "cold", name: "Cold engine", status: "STOPPED" }
+        { id: "hot", name: "Hot engine", status: { state: "STARTED" } },
+        { id: "cold", name: "Cold engine", status: { state: "STOPPED" } }
       ]
     });
     render(<App />);
@@ -161,10 +174,10 @@ describe("App", () => {
 
 type MockCatalogItem = {
   id: string;
-  path: string[];
+  path?: string[];
   source_type?: string;
-  type: string;
-};
+  type?: string;
+} & Record<string, unknown>;
 
 function mockAuthenticatedFetch({
   catalogItems = [],
@@ -223,4 +236,9 @@ function jsonResponse(payload: unknown) {
     status: 200,
     headers: { "Content-Type": "application/json" }
   });
+}
+
+function expectCatalogIcon(itemName: string, iconClass: string) {
+  const row = screen.getByText(itemName).closest(".tree-label");
+  expect(row?.querySelector(`.${iconClass}`)).toBeInTheDocument();
 }

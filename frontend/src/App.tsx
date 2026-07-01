@@ -199,7 +199,7 @@ function CatalogView({
     setExpandedIds(new Set());
     api
       .catalogRoot()
-      .then((response) => setRootItems(response.items))
+      .then((response) => setRootItems(response.items.map(normalizeCatalogItem)))
       .catch((err) => setError(err instanceof Error ? err.message : "Could not load catalog"))
       .finally(() => setLoading(false));
   }
@@ -242,7 +242,10 @@ function CatalogView({
     setLoadingChildrenIds((current) => new Set(current).add(item.id));
     try {
       const response = await api.catalogChildren(item.id);
-      setChildrenById((current) => ({ ...current, [item.id]: response.items }));
+      setChildrenById((current) => ({
+        ...current,
+        [item.id]: response.items.map(normalizeCatalogItem)
+      }));
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not load child objects");
       setChildrenById((current) => ({ ...current, [item.id]: [] }));
@@ -793,6 +796,66 @@ function inheritedLabel(grant: NormalizedGrant) {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function normalizeCatalogItem(item: CatalogItem): CatalogItem {
+  const raw = item as CatalogItem & Record<string, unknown>;
+  const rawPath = Array.isArray(raw.path) ? raw.path.map(String) : [];
+  const name = stringField(raw.name);
+  const path = rawPath.length > 0 ? rawPath : name ? [name] : [];
+  const entityType = stringField(raw.entityType);
+  const rawType = stringField(raw.type);
+  const type = entityType?.toLowerCase() === "source" ? "SOURCE" : rawType ?? "unknown";
+  const containerType = item.container_type ?? stringField(raw.containerType);
+  const sourceType = item.source_type ?? sourceTypeFromRaw(raw, entityType);
+
+  return {
+    ...item,
+    id: String(raw.id ?? path.join(".")),
+    path,
+    type,
+    container_type: containerType,
+    source_type: sourceType
+  };
+}
+
+function sourceTypeFromRaw(raw: Record<string, unknown>, entityType?: string) {
+  const candidates = [
+    raw.sourceType,
+    raw.source_type,
+    raw.sourceTypeName,
+    raw.pluginType,
+    raw.storageType,
+    raw.connectionType
+  ];
+  if (entityType?.toLowerCase() === "source") {
+    candidates.push(raw.type);
+  }
+
+  for (const field of ["sourceConfig", "config", "connectionConf", "connectionConfig"]) {
+    const config = raw[field];
+    if (isRecord(config)) {
+      candidates.push(
+        config.type,
+        config.sourceType,
+        config.pluginType,
+        config.storageType,
+        config.connectionType
+      );
+    }
+  }
+
+  for (const candidate of candidates) {
+    const value = stringField(candidate);
+    if (value) {
+      return value;
+    }
+  }
+  return undefined;
+}
+
+function stringField(value: unknown) {
+  return typeof value === "string" && value.trim() ? value.trim() : undefined;
 }
 
 function CatalogTreeNode({
@@ -1542,14 +1605,7 @@ function EngineStatusIndicator({ engine }: { engine: AdminItem }) {
 }
 
 function engineStatus(engine: AdminItem): { kind: "started" | "off" | "unknown"; label: string; raw: string } {
-  const raw = String(
-    engine.status ??
-      engine.state ??
-      engine.engineState ??
-      engine.currentState ??
-      engine.desiredState ??
-      "Unknown"
-  );
+  const raw = engineStateValue(engine) ?? "Unknown";
   const normalized = raw.trim().toUpperCase();
   if (["STARTED", "RUNNING", "ONLINE", "ACTIVE", "ENABLED"].includes(normalized)) {
     return { kind: "started", label: "Started", raw };
@@ -1570,6 +1626,47 @@ function engineStatus(engine: AdminItem): { kind: "started" | "off" | "unknown";
     return { kind: "off", label: "Off", raw };
   }
   return { kind: "unknown", label: "Unknown", raw };
+}
+
+function engineStateValue(engine: AdminItem) {
+  return firstDisplayValue([
+    engine.status,
+    engine.state,
+    engine.engineState,
+    engine.currentState,
+    engine.desiredState
+  ]);
+}
+
+function firstDisplayValue(values: unknown[]) {
+  for (const value of values) {
+    const displayValue = displayValueFromUnknown(value);
+    if (displayValue) {
+      return displayValue;
+    }
+  }
+  return undefined;
+}
+
+function displayValueFromUnknown(value: unknown): string | undefined {
+  if (typeof value === "string" && value.trim()) {
+    return value.trim();
+  }
+  if (typeof value === "number" || typeof value === "boolean") {
+    return String(value);
+  }
+  if (!isRecord(value)) {
+    return undefined;
+  }
+  return firstDisplayValue([
+    value.state,
+    value.status,
+    value.engineState,
+    value.currentState,
+    value.desiredState,
+    value.value,
+    value.name
+  ]);
 }
 
 function adminIcon(title: string) {
@@ -1602,14 +1699,7 @@ function adminItemSubtitle(item: AdminItem) {
   if ("identityType" in item || "source" in item || "authProvider" in item) {
     return userOriginLabel(item);
   }
-  return String(
-    item.type ??
-      item.identityType ??
-      item.status ??
-      item.state ??
-      item.engineState ??
-      "Record"
-  );
+  return firstDisplayValue([item.type, item.identityType]) ?? engineStateValue(item) ?? "Record";
 }
 
 function userOriginLabel(item: AdminItem) {
