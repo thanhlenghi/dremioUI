@@ -60,13 +60,13 @@ class QnaRequest(BaseModel):
     question: str = Field(min_length=1)
     object_id: str | None = None
     job_ids: list[str] = Field(default_factory=list)
-    rbac_user_id: str | None = None
 
 
 class QnaResponse(BaseModel):
     answer: str
     draft_sql: str | None = None
     citations: list[str] = Field(default_factory=list)
+    raw: dict[str, Any] = Field(default_factory=dict)
 
 
 class AdminListResponse(BaseModel):

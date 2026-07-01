@@ -32,6 +32,7 @@ export type QnaResponse = {
   answer: string;
   draft_sql?: string | null;
   citations: string[];
+  raw: Record<string, unknown>;
 };
 
 export type RbacExplanation = {

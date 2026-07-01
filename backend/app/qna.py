@@ -7,10 +7,11 @@ from backend.app.models import JobSummary, QnaResponse
 
 
 SYSTEM_PROMPT = """You help administer Dremio from metadata, RBAC provenance, and job history only.
-Never claim to have inspected table rows. If SQL is useful, provide a read-only SELECT draft.
-Do not suggest destructive admin changes. For RBAC questions, explain direct grants,
-role-derived grants, inherited grants, and where each privilege was explicitly granted.
-Cite catalog objects or job ids used in the answer."""
+Never claim to have inspected table rows. Do not suggest destructive admin changes.
+Answer in clear human language, not JSON-style prose. For RBAC questions, explain
+who has access, where each privilege was explicitly granted, whether it is inherited
+by the selected object, and any unresolved gaps. Cite catalog objects or job ids used
+in the answer."""
 
 
 class QnaProvider(Protocol):
@@ -44,7 +45,8 @@ class OpenAIQnaProvider:
             "rbac": rbac_context,
             "policy": (
                 "Only metadata, SQL text, status, timings, errors, and counts are present. "
-                "No row data."
+                "No row data. Do not draft or run SQL unless the user explicitly asks outside "
+                "an RBAC question."
             ),
         }
         response = await self._client.responses.create(

@@ -46,14 +46,13 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ sql, context })
     }),
-  qna: (question: string, objectId?: string, jobIds: string[] = [], rbacUserId?: string) =>
+  qna: (question: string, objectId?: string, jobIds: string[] = []) =>
     request<QnaResponse>("/api/qna", {
       method: "POST",
       body: JSON.stringify({
         question,
         object_id: objectId,
-        job_ids: jobIds,
-        rbac_user_id: rbacUserId
+        job_ids: jobIds
       })
     }),
   explainRbac: (objectId: string, userId: string) =>

@@ -1,3 +1,4 @@
+import re
 from typing import Any
 
 from backend.app.dremio import DremioClient, DremioError
@@ -52,6 +53,95 @@ async def explain_rbac_access(
     )
 
 
+def question_has_rbac_intent(question: str) -> bool:
+    normalized = question.lower()
+    terms = [
+        "access",
+        "grant",
+        "grantee",
+        "permission",
+        "permissions",
+        "privilege",
+        "privileges",
+        "rbac",
+        "role",
+        "roles",
+        "user",
+        "users",
+    ]
+    return any(term in normalized for term in terms)
+
+
+async def explain_object_rbac_context(
+    client: DremioClient,
+    object_id: str,
+    question: str,
+) -> dict[str, Any]:
+    catalog_object = await client.get_catalog_object(object_id)
+    object_path = _path_from_object(catalog_object)
+    object_chain = await _resolve_object_chain(client, object_path, object_id)
+    users = await client.list_users()
+    inferred_user = infer_user_from_question(question, users)
+    roles = await _safe_list_roles(client)
+    unresolved: list[str] = []
+
+    if not object_chain:
+        unresolved.append("Could not resolve parent objects; inherited grants may be incomplete.")
+
+    object_grants: list[dict[str, Any]] = []
+    for item in object_chain:
+        permissions = await _safe_permissions(client, item.id)
+        for grant in _grant_records(permissions):
+            object_grants.extend(
+                _object_grant_explanations(grant, item, selected_object_id=object_id)
+            )
+
+    context: dict[str, Any] = {
+        "mode": "user" if inferred_user else "object",
+        "object_id": object_id,
+        "object_path": object_path,
+        "inferred_user": _public_user(inferred_user) if inferred_user else None,
+        "object_grants": _dedupe_object_grants(object_grants),
+        "users": [_public_user(user) for user in users],
+        "roles": [_public_principal(role) for role in roles],
+        "unresolved": unresolved,
+    }
+
+    if inferred_user:
+        user_key = _string_value(inferred_user.get("id")) or _string_value(
+            inferred_user.get("email")
+            or inferred_user.get("userName")
+            or inferred_user.get("username")
+            or inferred_user.get("name")
+        )
+        if user_key:
+            context["user_provenance"] = (
+                await explain_rbac_access(client, object_id, user_key)
+            ).model_dump()
+        else:
+            unresolved.append("A user was inferred from the prompt, but it has no usable id or email.")
+
+    return context
+
+
+def infer_user_from_question(
+    question: str,
+    users: list[dict[str, Any]],
+) -> dict[str, Any] | None:
+    normalized_question = _principal_key(question)
+    question_tokens = set(re.findall(r"[a-z0-9_.@+-]+", normalized_question))
+    for user in users:
+        for key in _user_lookup_values(user):
+            normalized_key = _principal_key(key)
+            if not normalized_key:
+                continue
+            if len(normalized_key) < 3 and normalized_key in question_tokens:
+                return user
+            if len(normalized_key) >= 3 and normalized_key in normalized_question:
+                return user
+    return None
+
+
 async def _resolve_object_chain(
     client: DremioClient,
     object_path: list[str],
@@ -66,6 +156,38 @@ async def _resolve_object_chain(
 async def _safe_permissions(client: DremioClient, object_id: str) -> dict[str, Any]:
     permissions = await client.get_catalog_permissions(object_id)
     return permissions if isinstance(permissions, dict) else {}
+
+
+async def _safe_list_roles(client: DremioClient) -> list[dict[str, Any]]:
+    try:
+        return await client.list_roles()
+    except (DremioError, AttributeError):
+        return []
+
+
+def _object_grant_explanations(
+    grant: dict[str, Any],
+    item: CatalogItem,
+    selected_object_id: str,
+) -> list[dict[str, Any]]:
+    privileges = _privileges_from_grant(grant)
+    if not privileges:
+        return []
+    grantee_type = str(grant.get("granteeType") or grant.get("type") or "UNKNOWN").upper()
+    return [
+        {
+            "privilege": privilege,
+            "grantee_type": grantee_type,
+            "grantee_id": _string_value(grant.get("id")),
+            "grantee_name": _string_value(grant.get("name")),
+            "grantee_email": _string_value(grant.get("email")),
+            "grant_object_id": item.id,
+            "grant_object_path": item.path,
+            "inherited": item.id != selected_object_id or _is_inherited_grant(grant),
+            "explicit": True,
+        }
+        for privilege in privileges
+    ]
 
 
 def _matching_grant_explanations(
@@ -148,14 +270,7 @@ def _privileges_from_grant(grant: dict[str, Any]) -> list[str]:
 def _find_user(users: list[dict[str, Any]], user_id: str) -> dict[str, Any] | None:
     needle = _principal_key(user_id)
     for user in users:
-        keys = [
-            user.get("id"),
-            user.get("name"),
-            user.get("email"),
-            user.get("userName"),
-            user.get("username"),
-            user.get("displayName"),
-        ]
+        keys = _user_lookup_values(user)
         if needle in {_principal_key(key) for key in keys if key is not None}:
             return user
     return None
@@ -266,6 +381,55 @@ def _dedupe_principals(principals: list[RbacPrincipal]) -> list[RbacPrincipal]:
         if key:
             deduped[key] = principal
     return sorted(deduped.values(), key=lambda principal: principal.name or principal.id or "")
+
+
+def _dedupe_object_grants(grants: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    deduped: dict[tuple[str, str, str, str, str], dict[str, Any]] = {}
+    for grant in grants:
+        key = (
+            str(grant.get("privilege") or ""),
+            str(grant.get("grantee_type") or ""),
+            str(grant.get("grantee_id") or grant.get("grantee_name") or ""),
+            str(grant.get("grant_object_id") or ""),
+            str(grant.get("inherited") or ""),
+        )
+        deduped[key] = grant
+    return sorted(
+        deduped.values(),
+        key=lambda grant: (
+            grant.get("grant_object_path") or [],
+            str(grant.get("grantee_type") or ""),
+            str(grant.get("grantee_name") or grant.get("grantee_id") or ""),
+            str(grant.get("privilege") or ""),
+        ),
+    )
+
+
+def _public_user(user: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "id": _string_value(user.get("id")),
+        "name": _string_value(user.get("name") or user.get("displayName")),
+        "email": _string_value(user.get("email") or user.get("userName") or user.get("username")),
+        "roles": [role.model_dump() for role in _role_refs_from_user(user)],
+    }
+
+
+def _public_principal(principal: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "id": _string_value(principal.get("id") or principal.get("roleId")),
+        "name": _string_value(principal.get("name") or principal.get("roleName")),
+    }
+
+
+def _user_lookup_values(user: dict[str, Any]) -> list[Any]:
+    return [
+        user.get("id"),
+        user.get("name"),
+        user.get("email"),
+        user.get("userName"),
+        user.get("username"),
+        user.get("displayName"),
+    ]
 
 
 def _principal_key(value: Any) -> str:

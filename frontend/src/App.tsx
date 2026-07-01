@@ -17,9 +17,9 @@ import {
   Library,
   Loader2,
   LogOut,
-  Play,
   RefreshCw,
   Search,
+  Send,
   Shield,
   Table2,
   Users
@@ -33,7 +33,7 @@ type View = "catalog" | "jobs" | "qna" | "users" | "roles" | "engines";
 const navItems: Array<{ view: View; label: string; icon: typeof Database }> = [
   { view: "catalog", label: "Catalog", icon: Database },
   { view: "jobs", label: "Jobs", icon: History },
-  { view: "qna", label: "SQL/Q&A", icon: Bot },
+  { view: "qna", label: "Ask Dremio", icon: Bot },
   { view: "users", label: "Users", icon: Users },
   { view: "roles", label: "Roles", icon: Shield },
   { view: "engines", label: "Engines", icon: Gauge }
@@ -1044,95 +1044,160 @@ function JobsView() {
   );
 }
 
+type ChatMessage = {
+  id: string;
+  role: "user" | "assistant";
+  text: string;
+  response?: QnaResponse;
+  loading?: boolean;
+  error?: string;
+};
+
 function QnaView({ selectedObject }: { selectedObject: CatalogItem | null }) {
   const [question, setQuestion] = useState("");
-  const [rbacUserId, setRbacUserId] = useState("");
-  const [sql, setSql] = useState("");
-  const [answer, setAnswer] = useState<QnaResponse | null>(null);
-  const [jobId, setJobId] = useState("");
-  const [error, setError] = useState("");
-  const [loading, setLoading] = useState(false);
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [selectedMessageId, setSelectedMessageId] = useState<string | null>(null);
+  const loading = messages.some((message) => message.loading);
+  const selectedAssistantMessage = messages.find(
+    (message) => message.id === selectedMessageId && message.role === "assistant" && message.response
+  );
 
-  async function ask() {
-    setLoading(true);
-    setError("");
-    try {
-      const response = await api.qna(
-        question,
-        selectedObject?.id,
-        [],
-        rbacUserId.trim() || undefined
-      );
-      setAnswer(response);
-      if (response.draft_sql) {
-        setSql(response.draft_sql);
-      }
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Question failed");
-    } finally {
-      setLoading(false);
+  async function ask(event: FormEvent) {
+    event.preventDefault();
+    const trimmedQuestion = question.trim();
+    if (!trimmedQuestion || loading) {
+      return;
     }
-  }
 
-  async function runSql() {
-    setLoading(true);
-    setError("");
+    const timestamp = Date.now();
+    const userMessage: ChatMessage = {
+      id: `user-${timestamp}`,
+      role: "user",
+      text: trimmedQuestion
+    };
+    const assistantId = `assistant-${timestamp}`;
+    const assistantMessage: ChatMessage = {
+      id: assistantId,
+      role: "assistant",
+      text: "Thinking",
+      loading: true
+    };
+
+    setMessages((current) => [...current, userMessage, assistantMessage]);
+    setSelectedMessageId(null);
+    setQuestion("");
+
     try {
-      const response = await api.runSql(sql, selectedObject?.path ?? []);
-      setJobId(response.job_id);
+      const response = await api.qna(trimmedQuestion, selectedObject?.id, []);
+      setMessages((current) =>
+        current.map((message) =>
+          message.id === assistantId
+            ? {
+                ...message,
+                text: response.answer,
+                response,
+                loading: false
+              }
+            : message
+        )
+      );
+      setSelectedMessageId(assistantId);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "SQL submission failed");
-    } finally {
-      setLoading(false);
+      setMessages((current) =>
+        current.map((message) =>
+          message.id === assistantId
+            ? {
+                ...message,
+                text: "Question failed",
+                loading: false,
+                error: err instanceof Error ? err.message : "Question failed"
+              }
+            : message
+        )
+      );
     }
   }
 
   return (
-    <section className="page-grid">
-      <div className="panel">
-        <h2>Ask Dremio</h2>
-        <p className="muted">
-          Context: {selectedObject ? selectedObject.path.join(".") : "no catalog object selected"}
-        </p>
-        <textarea
-          value={question}
-          onChange={(event) => setQuestion(event.target.value)}
-          placeholder="Ask about metadata, recent jobs, or draft a read-only query"
-        />
-        <label>
-          RBAC user or email
-          <input
-            value={rbacUserId}
-            onChange={(event) => setRbacUserId(event.target.value)}
-            placeholder="Optional, for permission provenance questions"
-          />
-        </label>
-        <button type="button" onClick={ask} disabled={loading || !question.trim()}>
-          <Bot size={16} />
-          Ask
-        </button>
-        {answer && (
-          <div className="answer">
-            <h3>Answer</h3>
-            <p>{answer.answer}</p>
+    <section className="ask-layout">
+      <div className="ask-main">
+        <div className="ask-header">
+          <div>
+            <h2>Ask Dremio</h2>
+            <span>
+              Context: {selectedObject ? selectedObject.path.join(".") : "no catalog object selected"}
+            </span>
           </div>
-        )}
+          <Bot size={20} />
+        </div>
+
+        <div className="chat-transcript" aria-label="Ask Dremio transcript">
+          {messages.length === 0 ? (
+            <div className="empty-state chat-empty">
+              Ask about metadata, jobs, or object permissions.
+            </div>
+          ) : (
+            messages.map((message) => (
+              <button
+                className={[
+                  "chat-message",
+                  message.role,
+                  message.id === selectedMessageId ? "selected" : "",
+                  message.error ? "failed" : ""
+                ]
+                  .filter(Boolean)
+                  .join(" ")}
+                disabled={message.role !== "assistant" || !message.response}
+                key={message.id}
+                onClick={() => setSelectedMessageId(message.id)}
+                type="button"
+              >
+                <span className="chat-message-label">
+                  {message.role === "user" ? "You" : "Dremio"}
+                  {message.loading && <Loader2 className="spin" size={14} />}
+                </span>
+                <span className="chat-message-text">{message.error ?? message.text}</span>
+              </button>
+            ))
+          )}
+        </div>
+
+        <form className="chat-composer" onSubmit={ask}>
+          <textarea
+            aria-label="Ask Dremio question"
+            value={question}
+            onChange={(event) => setQuestion(event.target.value)}
+            placeholder="Ask a question about the selected object"
+          />
+          <button type="submit" disabled={loading || !question.trim()} title="Send question">
+            <Send size={16} />
+            Ask
+          </button>
+        </form>
       </div>
-      <div className="panel">
-        <h2>SQL Draft</h2>
-        <textarea
-          className="sql-editor"
-          value={sql}
-          onChange={(event) => setSql(event.target.value)}
-          placeholder="Generated or hand-written SQL"
-        />
-        <button type="button" onClick={runSql} disabled={loading || !sql.trim()}>
-          <Play size={16} />
-          Run manually
-        </button>
-        {jobId && <div className="success">Submitted job {jobId}</div>}
-        {error && <div className="error">{error}</div>}
-      </div>
+
+      <aside className="info-panel ask-raw-panel">
+        <div className="info-panel-header">
+          <div className="info-panel-icon">
+            <FileText size={18} />
+          </div>
+          <div>
+            <h2>Raw Response</h2>
+            <span>
+              {selectedAssistantMessage
+                ? "Selected assistant response"
+                : "Select an assistant response"}
+            </span>
+          </div>
+        </div>
+        <div className="info-panel-body">
+          {selectedAssistantMessage?.response ? (
+            <pre>{JSON.stringify(selectedAssistantMessage.response, null, 2)}</pre>
+          ) : (
+            <div className="empty-state raw-empty">No assistant response selected.</div>
+          )}
+        </div>
+      </aside>
     </section>
   );
 }

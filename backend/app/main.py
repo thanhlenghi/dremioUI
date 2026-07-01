@@ -30,7 +30,11 @@ from backend.app.models import (
     SqlResponse,
 )
 from backend.app.qna import QnaProvider
-from backend.app.rbac import explain_rbac_access
+from backend.app.rbac import (
+    explain_object_rbac_context,
+    explain_rbac_access,
+    question_has_rbac_intent,
+)
 from backend.app.session_store import SessionStore, UserSession
 
 
@@ -152,19 +156,39 @@ async def qna(
     client: DremioClient = Depends(get_dremio_client),
     provider: QnaProvider = Depends(get_qna_provider),
 ) -> QnaResponse:
-    catalog_object = (
-        await client.get_catalog_object(request.object_id) if request.object_id else None
-    )
+    catalog_object = await client.get_catalog_object(request.object_id) if request.object_id else None
     jobs = [
         DremioClient._job_summary(await client.get_job(job_id))
         for job_id in request.job_ids[:10]
     ]
     rbac_context = None
-    if request.object_id and request.rbac_user_id:
-        rbac_context = (
-            await explain_rbac_access(client, request.object_id, request.rbac_user_id)
-        ).model_dump()
-    return await provider.answer(request.question, catalog_object, jobs, rbac_context)
+    rbac_intent = question_has_rbac_intent(request.question)
+    if rbac_intent and request.object_id:
+        rbac_context = await explain_object_rbac_context(client, request.object_id, request.question)
+    elif rbac_intent:
+        rbac_context = {
+            "mode": "unresolved",
+            "object_id": None,
+            "object_path": [],
+            "inferred_user": None,
+            "object_grants": [],
+            "users": [],
+            "roles": [],
+            "unresolved": [
+                "Select a catalog object before asking object-scoped RBAC questions."
+            ],
+        }
+
+    unresolved = rbac_context.get("unresolved", []) if isinstance(rbac_context, dict) else []
+    audit_payload = {
+        "selected_catalog_object": catalog_object,
+        "detected_rbac_intent": rbac_intent,
+        "deterministic_rbac_context": rbac_context,
+        "unresolved": unresolved,
+    }
+    response = await provider.answer(request.question, catalog_object, jobs, rbac_context)
+    response.raw = audit_payload
+    return response
 
 
 @app.get("/api/rbac/explain", response_model=RbacExplanationResponse)

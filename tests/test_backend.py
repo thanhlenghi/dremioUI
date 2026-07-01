@@ -65,7 +65,6 @@ class FakeQnaProvider:
     ) -> QnaResponse:
         return QnaResponse(
             answer=f"Answered: {question}",
-            draft_sql="SELECT 1",
             citations=[job.id for job in jobs],
         )
 
@@ -249,7 +248,7 @@ def test_catalog_item_preserves_source_type() -> None:
     assert item.source_type == "S3"
 
 
-def test_qna_returns_draft_sql() -> None:
+def test_qna_returns_human_answer_text() -> None:
     async def current_session() -> UserSession:
         return UserSession(user_id="allowed@example.org", dremio_token="token")
 
@@ -264,7 +263,103 @@ def test_qna_returns_draft_sql() -> None:
         app.dependency_overrides.pop(get_current_session, None)
 
     assert response.status_code == 200
-    assert response.json()["draft_sql"] == "SELECT 1"
+    payload = response.json()
+    assert payload["answer"] == "Answered: What happened?"
+    assert payload["raw"]["selected_catalog_object"]["id"] == "src"
+
+
+def test_qna_object_rbac_raw_includes_users_roles_and_grant_locations() -> None:
+    async def current_session() -> UserSession:
+        return UserSession(user_id="allowed@example.org", dremio_token="token")
+
+    app.dependency_overrides[get_current_session] = current_session
+    app.dependency_overrides[get_dremio_client] = lambda: FakeRbacDremioClient()
+    try:
+        for test_client in client():
+            response = test_client.post(
+                "/api/qna",
+                json={
+                    "question": "Which roles and users have permissions set on this object?",
+                    "object_id": "table-id",
+                },
+            )
+    finally:
+        app.dependency_overrides.pop(get_current_session, None)
+        app.dependency_overrides.pop(get_dremio_client, None)
+
+    assert response.status_code == 200
+    rbac_context = response.json()["raw"]["deterministic_rbac_context"]
+    assert rbac_context["mode"] == "object"
+    assert rbac_context["users"][0]["email"] == "analyst@example.org"
+    assert rbac_context["roles"] == [{"id": "r1", "name": "Reader"}]
+    assert {
+        (
+            grant["grantee_type"],
+            grant["grantee_name"],
+            grant["privilege"],
+            ".".join(grant["grant_object_path"]),
+            grant["inherited"],
+        )
+        for grant in rbac_context["object_grants"]
+    } == {
+        ("ROLE", "Reader", "READ_METADATA", "src", True),
+        ("ROLE", "Reader", "SELECT", "src.folder", True),
+        ("USER", "Analyst", "READ", "src.folder.table", False),
+    }
+
+
+def test_qna_rbac_prompt_infers_user_and_includes_user_provenance() -> None:
+    async def current_session() -> UserSession:
+        return UserSession(user_id="allowed@example.org", dremio_token="token")
+
+    app.dependency_overrides[get_current_session] = current_session
+    app.dependency_overrides[get_dremio_client] = lambda: FakeRbacDremioClient()
+    try:
+        for test_client in client():
+            response = test_client.post(
+                "/api/qna",
+                json={
+                    "question": "What access does analyst@example.org have here?",
+                    "object_id": "table-id",
+                },
+            )
+    finally:
+        app.dependency_overrides.pop(get_current_session, None)
+        app.dependency_overrides.pop(get_dremio_client, None)
+
+    assert response.status_code == 200
+    rbac_context = response.json()["raw"]["deterministic_rbac_context"]
+    assert rbac_context["mode"] == "user"
+    assert rbac_context["inferred_user"]["id"] == "u1"
+    assert rbac_context["user_provenance"]["effective_privileges"] == [
+        "READ",
+        "READ_METADATA",
+        "SELECT",
+    ]
+
+
+def test_qna_rbac_prompt_without_selected_object_returns_unresolved_warning() -> None:
+    async def current_session() -> UserSession:
+        return UserSession(user_id="allowed@example.org", dremio_token="token")
+
+    app.dependency_overrides[get_current_session] = current_session
+    app.dependency_overrides[get_dremio_client] = lambda: FakeRbacDremioClient()
+    try:
+        for test_client in client():
+            response = test_client.post(
+                "/api/qna",
+                json={"question": "Which roles have permission here?"},
+            )
+    finally:
+        app.dependency_overrides.pop(get_current_session, None)
+        app.dependency_overrides.pop(get_dremio_client, None)
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["raw"]["detected_rbac_intent"] is True
+    assert payload["raw"]["unresolved"] == [
+        "Select a catalog object before asking object-scoped RBAC questions."
+    ]
 
 
 def test_catalog_object_accepts_list_permissions() -> None:
