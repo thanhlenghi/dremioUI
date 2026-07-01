@@ -119,11 +119,17 @@ class DremioClient:
         bounded_limit = max(1, min(limit, 200))
         queries = [
             (
-                "SELECT job_id, user_name, query_type, status, start_time, duration, query "
-                "FROM sys.jobs_recent ORDER BY start_time DESC LIMIT "
+                "SELECT job_id, user_name, query_type, status, submitted_ts, query "
+                "FROM sys.jobs_recent ORDER BY submitted_ts DESC LIMIT "
                 f"{bounded_limit}"
             ),
-            f"SELECT * FROM sys.jobs_recent LIMIT {bounded_limit}",
+            f"SELECT * FROM sys.jobs_recent ORDER BY submitted_ts DESC LIMIT {bounded_limit}",
+            (
+                "SELECT job_id, user_name, query_type, status, submitted_ts, query "
+                "FROM sys.jobs ORDER BY submitted_ts DESC LIMIT "
+                f"{bounded_limit}"
+            ),
+            f"SELECT * FROM sys.jobs ORDER BY submitted_ts DESC LIMIT {bounded_limit}",
         ]
         last_error: DremioError | None = None
         for sql in queries:
@@ -134,7 +140,8 @@ class DremioClient:
                 return [self._job_summary(row) for row in rows]
             except DremioError as exc:
                 last_error = exc
-        raise DremioError("Could not load recent jobs from sys.jobs_recent") from last_error
+        detail = f": {last_error}" if last_error else ""
+        raise DremioError(f"Could not load jobs from sys.jobs_recent or sys.jobs{detail}") from last_error
 
     async def _wait_for_job_results(self, job_id: str, limit: int) -> dict[str, Any]:
         last_error: DremioError | None = None
@@ -192,14 +199,26 @@ class DremioClient:
 
     @staticmethod
     def _catalog_item(item: dict[str, Any]) -> CatalogItem:
+        path = item.get("path")
+        if not isinstance(path, list):
+            name = item.get("name")
+            path = [name] if isinstance(name, str) and name.strip() else []
+
         return CatalogItem(
-            id=str(item.get("id") or ".".join(item.get("path", []))),
-            path=list(item.get("path", [])),
-            type=str(item.get("type") or item.get("entityType") or "unknown"),
+            id=str(item.get("id") or ".".join(str(segment) for segment in path)),
+            path=list(path),
+            type=DremioClient._catalog_type(item),
             tag=item.get("tag"),
             container_type=item.get("containerType"),
             source_type=DremioClient._source_type(item),
         )
+
+    @staticmethod
+    def _catalog_type(item: dict[str, Any]) -> str:
+        entity_type = item.get("entityType")
+        if isinstance(entity_type, str) and entity_type.strip().lower() == "source":
+            return "SOURCE"
+        return str(item.get("type") or entity_type or "unknown")
 
     @staticmethod
     def _match_catalog_segment(
@@ -225,6 +244,10 @@ class DremioClient:
             item.get("storageType"),
             item.get("connectionType"),
         ]
+        entity_type = item.get("entityType")
+        if isinstance(entity_type, str) and entity_type.strip().lower() == "source":
+            candidates.append(item.get("type"))
+
         for field in ("sourceConfig", "config", "connectionConf", "connectionConfig"):
             config = item.get(field)
             if isinstance(config, dict):
@@ -245,12 +268,19 @@ class DremioClient:
 
     @staticmethod
     def _job_summary(row: dict[str, Any]) -> JobSummary:
+        start_time = (
+            row.get("start_time")
+            or row.get("submitted_ts")
+            or row.get("submitted")
+            or row.get("submitted_time")
+            or row.get("startTime")
+        )
         return JobSummary(
             id=str(row.get("job_id") or row.get("id") or ""),
             user_name=row.get("user_name") or row.get("user"),
             query_type=row.get("query_type"),
             status=row.get("status"),
-            start_time=str(row.get("start_time")) if row.get("start_time") is not None else None,
+            start_time=str(start_time) if start_time is not None else None,
             duration_ms=row.get("duration") or row.get("duration_ms"),
             sql=row.get("query") or row.get("sql"),
             raw=row,

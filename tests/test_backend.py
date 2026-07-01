@@ -142,10 +142,68 @@ class FakeFailedPrimaryJobsDremioClient(DremioClient):
                     "job_id": "job-2",
                     "user_name": "engineer",
                     "status": "COMPLETED",
+                    "submitted_ts": "2026-07-01 10:00:00.000",
                     "query": "SELECT 2",
                 }
             ]
         }
+
+
+class FakeJobsRecentUnavailableDremioClient(DremioClient):
+    def __init__(self) -> None:
+        self.submitted_sql: list[str] = []
+        self._job_poll_attempts = 1
+        self._job_poll_interval = 0
+
+    async def submit_sql(self, sql: str, context: list[str] | None = None) -> str:
+        self.submitted_sql.append(sql)
+        return f"job-{len(self.submitted_sql)}"
+
+    async def get_job(self, job_id: str) -> dict[str, Any]:
+        if job_id in {"job-1", "job-2"}:
+            return {"id": job_id, "jobState": "FAILED"}
+        return {"id": job_id, "jobState": "COMPLETED"}
+
+    async def get_job_results(
+        self,
+        job_id: str,
+        offset: int = 0,
+        limit: int = 100,
+    ) -> dict[str, Any]:
+        if job_id in {"job-1", "job-2"}:
+            raise DremioError('Dremio 403: {"errorMessage":"Access denied to sys.jobs_recent"}')
+        return {
+            "rows": [
+                {
+                    "job_id": "running-job",
+                    "user_name": "analyst",
+                    "status": "RUNNING",
+                    "query_type": "UI_RUN",
+                    "submitted_ts": "2026-07-01 11:00:00.000",
+                    "query": "SELECT * FROM sys.jobs",
+                }
+            ]
+        }
+
+
+class FakeAllSystemJobsUnavailableDremioClient(DremioClient):
+    def __init__(self) -> None:
+        self._job_poll_attempts = 1
+        self._job_poll_interval = 0
+
+    async def submit_sql(self, sql: str, context: list[str] | None = None) -> str:
+        return "failed-job"
+
+    async def get_job(self, job_id: str) -> dict[str, Any]:
+        return {"id": job_id, "jobState": "FAILED"}
+
+    async def get_job_results(
+        self,
+        job_id: str,
+        offset: int = 0,
+        limit: int = 100,
+    ) -> dict[str, Any]:
+        raise DremioError('Dremio 403: {"errorMessage":"Access denied to system jobs"}')
 
 
 class FakeFailingJobsDremioClient(FakeDremioClient):
@@ -315,6 +373,28 @@ def test_catalog_item_preserves_source_type() -> None:
         }
     )
 
+    assert item.source_type == "S3"
+
+
+def test_catalog_item_normalizes_dremio_source_metadata() -> None:
+    item = DremioClient._catalog_item(
+        {
+            "entityType": "source",
+            "id": "657e7168-3019-440f-a1da-7f7820c92c0c",
+            "type": "S3",
+            "name": "local_s3",
+            "config": {
+                "propertyList": [
+                    {"name": "fs.s3a.endpoint", "value": "s3datahub.rstorage.eea:443"},
+                    {"name": "dremio.s3.compat", "value": "true"},
+                ]
+            },
+        }
+    )
+
+    assert item.id == "657e7168-3019-440f-a1da-7f7820c92c0c"
+    assert item.path == ["local_s3"]
+    assert item.type == "SOURCE"
     assert item.source_type == "S3"
 
 
@@ -504,6 +584,34 @@ async def test_recent_jobs_falls_back_when_projected_jobs_query_fails() -> None:
     assert len(dremio.submitted_sql) == 2
     assert "SELECT * FROM sys.jobs_recent" in dremio.submitted_sql[1]
     assert jobs[0].id == "job-2"
+    assert jobs[0].start_time == "2026-07-01 10:00:00.000"
+
+
+async def test_recent_jobs_falls_back_to_running_jobs_when_recent_history_is_unavailable() -> None:
+    dremio = FakeJobsRecentUnavailableDremioClient()
+
+    jobs = await dremio.list_recent_jobs(limit=50)
+
+    assert len(dremio.submitted_sql) == 3
+    assert "FROM sys.jobs_recent" in dremio.submitted_sql[0]
+    assert "SELECT * FROM sys.jobs_recent" in dremio.submitted_sql[1]
+    assert "FROM sys.jobs" in dremio.submitted_sql[2]
+    assert jobs[0].id == "running-job"
+    assert jobs[0].start_time == "2026-07-01 11:00:00.000"
+
+
+async def test_recent_jobs_error_includes_last_system_table_failure() -> None:
+    dremio = FakeAllSystemJobsUnavailableDremioClient()
+
+    try:
+        await dremio.list_recent_jobs(limit=50)
+    except DremioError as exc:
+        message = str(exc)
+    else:
+        raise AssertionError("Expected job history loading to fail")
+
+    assert "Could not load jobs from sys.jobs_recent or sys.jobs" in message
+    assert "Access denied to system jobs" in message
 
 
 def test_jobs_returns_warning_when_history_is_unavailable() -> None:

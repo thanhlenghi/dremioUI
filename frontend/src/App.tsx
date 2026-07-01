@@ -978,7 +978,31 @@ function rawObjectTypeLabel(item: CatalogItem) {
 }
 
 function isSourceItem(item: CatalogItem) {
-  return item.type.toUpperCase() === "SOURCE" || item.container_type?.toUpperCase() === "SOURCE";
+  const rawType = item.type.toUpperCase();
+  const sourcePluginTypes = [
+    "AMAZON_S3",
+    "AWS_S3",
+    "BIGQUERY",
+    "DB2",
+    "HDFS",
+    "MSSQL",
+    "MYSQL",
+    "NAS",
+    "ORACLE",
+    "POSTGRES",
+    "POSTGRESQL",
+    "REDSHIFT",
+    "S3",
+    "SNOWFLAKE",
+    "SQLSERVER",
+    "SQL_SERVER",
+    "TERADATA",
+  ];
+  return (
+    rawType === "SOURCE" ||
+    item.container_type?.toUpperCase() === "SOURCE" ||
+    sourcePluginTypes.includes(rawType)
+  );
 }
 
 function sourceTypeLabel(item: CatalogItem) {

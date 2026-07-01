@@ -102,6 +102,24 @@ describe("App", () => {
     expect(screen.getByText("CSV File")).toBeInTheDocument();
   });
 
+  it("labels Dremio source metadata with plugin type as an S3 source", async () => {
+    mockAuthenticatedFetch({
+      catalogItems: [
+        {
+          id: "657e7168-3019-440f-a1da-7f7820c92c0c",
+          path: ["local_s3"],
+          type: "S3"
+        }
+      ]
+    });
+    render(<App />);
+
+    expect(await screen.findByText("local_s3")).toBeInTheDocument();
+    expect(screen.getByText("S3")).toBeInTheDocument();
+    expect(screen.queryByText("File")).not.toBeInTheDocument();
+    expect(document.querySelector(".catalog-icon.source-s3")).toBeInTheDocument();
+  });
+
   it("shows started and off engine lights in the engine info pane", async () => {
     mockAuthenticatedFetch({
       engineItems: [
