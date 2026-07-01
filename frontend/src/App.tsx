@@ -5,13 +5,19 @@ import {
   Cloud,
   Check,
   Copy,
+  Boxes,
   Database,
   Eye,
   File,
+  FileArchive,
+  FileCode,
+  FileJson,
+  FileSpreadsheet,
   FileText,
   Folder,
   FolderOpen,
   Gauge,
+  HardDrive,
   History,
   Home,
   Info,
@@ -22,6 +28,7 @@ import {
   RefreshCw,
   Search,
   Send,
+  Server,
   Shield,
   Table2,
   Users
@@ -315,26 +322,26 @@ function CatalogView({
           </div>
           <div>
             <h2>{selectedObject ? displayName(selectedObject) : "Object Info"}</h2>
-            <span>{selectedObject ? selectedObjectName : "Select an object in the tree"}</span>
+            {selectedObject ? (
+              <div className="info-panel-path">
+                <span>{selectedObjectName}</span>
+                <button
+                  type="button"
+                  onClick={copySelectedObjectName}
+                  title="Copy object name"
+                  aria-label="Copy object name"
+                >
+                  {copyStatus === "Copied" ? <Check size={14} /> : <Copy size={14} />}
+                </button>
+                {copyStatus && <small>{copyStatus}</small>}
+              </div>
+            ) : (
+              <span>Select an object in the tree</span>
+            )}
           </div>
         </div>
         {selectedObject ? (
           <div className="info-panel-body">
-            <div className="object-name-copy">
-              <div>
-                <span>Object name</span>
-                <strong>{selectedObjectName}</strong>
-              </div>
-              <button
-                type="button"
-                onClick={copySelectedObjectName}
-                title="Copy object name"
-                aria-label="Copy object name"
-              >
-                {copyStatus === "Copied" ? <Check size={16} /> : <Copy size={16} />}
-              </button>
-              {copyStatus && <small>{copyStatus}</small>}
-            </div>
             <div className="metric-row">
               <InfoPill label="Type" value={objectTypeLabel(selectedObject)} />
               <InfoPill label="ID" value={selectedObject.id} />
@@ -841,9 +848,9 @@ function CatalogTreeNode({
           )}
         </button>
         <button className="tree-label" type="button" onClick={() => onSelect(item)}>
-          <Icon size={17} />
+          <Icon className={catalogIconClass(item)} size={17} />
           <span>{displayName(item)}</span>
-          <small>{objectTypeLabel(item)}</small>
+          <small className="object-type-badge">{objectTypeLabel(item)}</small>
         </button>
       </div>
       {expanded && children.length > 0 && (
@@ -890,15 +897,21 @@ function isExpandable(item: CatalogItem) {
 
 function iconForItem(item: CatalogItem, expanded: boolean) {
   const containerType = item.container_type?.toUpperCase() ?? "";
-  const label = rawObjectTypeLabel(item).toUpperCase();
+  const label = itemDescriptor(item);
 
   if (isSourceItem(item)) {
     const sourceKind = classifySource(item);
     if (sourceKind === "s3") {
       return Cloud;
     }
+    if (sourceKind === "filesystem") {
+      return HardDrive;
+    }
     if (sourceKind === "catalog") {
-      return Library;
+      return Boxes;
+    }
+    if (isSqlSourceKind(sourceKind)) {
+      return Server;
     }
     return Database;
   }
@@ -911,21 +924,50 @@ function iconForItem(item: CatalogItem, expanded: boolean) {
   if (label.includes("FOLDER")) {
     return expanded ? FolderOpen : Folder;
   }
-  if (label.includes("VIEW")) {
+  if (isViewItem(item)) {
     return Eye;
   }
-  if (label.includes("DATASET") || label.includes("TABLE")) {
+  if (isTableItem(item)) {
     return Table2;
   }
-  if (label.includes("FILE")) {
-    return FileText;
+  if (isFileItem(item)) {
+    return fileIconForItem(item);
   }
   return File;
+}
+
+function catalogIconClass(item: CatalogItem) {
+  if (isSourceItem(item)) {
+    return `catalog-icon source-${classifySource(item)}`;
+  }
+  if (isViewItem(item)) {
+    return "catalog-icon view";
+  }
+  if (isTableItem(item)) {
+    return "catalog-icon table";
+  }
+  if (isFileItem(item)) {
+    return `catalog-icon file-${fileKind(item)}`;
+  }
+  if (isExpandable(item)) {
+    return "catalog-icon folder";
+  }
+  return "catalog-icon";
 }
 
 function objectTypeLabel(item: CatalogItem) {
   if (isSourceItem(item)) {
     return sourceTypeLabel(item);
+  }
+  if (isViewItem(item)) {
+    return "View";
+  }
+  if (isTableItem(item)) {
+    return "Table";
+  }
+  if (isFileItem(item)) {
+    const kind = fileKind(item);
+    return kind === "generic" ? "File" : `${kind.toUpperCase()} File`;
   }
   const label = rawObjectTypeLabel(item);
   return titleCase(label);
@@ -942,22 +984,83 @@ function isSourceItem(item: CatalogItem) {
 function sourceTypeLabel(item: CatalogItem) {
   const sourceType = item.source_type?.trim();
   const sourceKind = classifySource(item);
-  if (sourceKind === "catalog") {
-    return "Catalog";
-  }
-  if (sourceKind === "s3") {
-    return "S3";
-  }
-  if (sourceKind === "sql") {
-    return "SQL";
+  const labels: Record<SourceKind, string> = {
+    bigquery: "BigQuery",
+    catalog: "Catalog",
+    db2: "DB2",
+    filesystem: "Files",
+    mssql: "MSSQL",
+    mysql: "MySQL",
+    oracle: "Oracle",
+    postgres: "PostgreSQL",
+    redshift: "Redshift",
+    s3: "S3",
+    snowflake: "Snowflake",
+    source: "Source",
+    sql: "SQL",
+    teradata: "Teradata",
+  };
+  if (sourceKind !== "source") {
+    return labels[sourceKind];
   }
   return sourceType ? titleCase(sourceType) : "Source";
 }
 
-function classifySource(item: CatalogItem): "catalog" | "s3" | "sql" | "source" {
-  const descriptor = `${item.source_type ?? ""} ${displayName(item)}`.toUpperCase();
+type SourceKind =
+  | "bigquery"
+  | "catalog"
+  | "db2"
+  | "filesystem"
+  | "mssql"
+  | "mysql"
+  | "oracle"
+  | "postgres"
+  | "redshift"
+  | "s3"
+  | "snowflake"
+  | "source"
+  | "sql"
+  | "teradata";
+
+function classifySource(item: CatalogItem): SourceKind {
+  const descriptor = itemDescriptor(item);
   if (/\bS3\b|AMAZON_S3|AWS_S3/.test(descriptor)) {
     return "s3";
+  }
+  if (descriptor.includes("MSSQL") || descriptor.includes("SQLSERVER") || descriptor.includes("SQL_SERVER")) {
+    return "mssql";
+  }
+  if (descriptor.includes("POSTGRES") || descriptor.includes("POSTGRESQL")) {
+    return "postgres";
+  }
+  if (descriptor.includes("MYSQL") || descriptor.includes("MARIADB")) {
+    return "mysql";
+  }
+  if (descriptor.includes("ORACLE")) {
+    return "oracle";
+  }
+  if (descriptor.includes("SNOWFLAKE")) {
+    return "snowflake";
+  }
+  if (descriptor.includes("REDSHIFT")) {
+    return "redshift";
+  }
+  if (descriptor.includes("BIGQUERY")) {
+    return "bigquery";
+  }
+  if (descriptor.includes("TERADATA")) {
+    return "teradata";
+  }
+  if (descriptor.includes("DB2")) {
+    return "db2";
+  }
+  if (
+    descriptor.includes("LOCAL") ||
+    descriptor.includes("HDFS") ||
+    descriptor.includes("NAS") ||
+    descriptor.includes("FILE")
+  ) {
+    return "filesystem";
   }
   if (
     descriptor.includes("OPEN_CATALOG") ||
@@ -968,22 +1071,74 @@ function classifySource(item: CatalogItem): "catalog" | "s3" | "sql" | "source" 
   ) {
     return "catalog";
   }
-  if (
-    descriptor.includes("SQL") ||
-    descriptor.includes("JDBC") ||
-    descriptor.includes("POSTGRES") ||
-    descriptor.includes("MYSQL") ||
-    descriptor.includes("MSSQL") ||
-    descriptor.includes("ORACLE") ||
-    descriptor.includes("SNOWFLAKE") ||
-    descriptor.includes("REDSHIFT") ||
-    descriptor.includes("BIGQUERY") ||
-    descriptor.includes("TERADATA") ||
-    descriptor.includes("DB2")
-  ) {
+  if (descriptor.includes("SQL") || descriptor.includes("JDBC")) {
     return "sql";
   }
   return "source";
+}
+
+function isSqlSourceKind(sourceKind: SourceKind) {
+  return [
+    "bigquery",
+    "db2",
+    "mssql",
+    "mysql",
+    "oracle",
+    "postgres",
+    "redshift",
+    "snowflake",
+    "sql",
+    "teradata",
+  ].includes(sourceKind);
+}
+
+function itemDescriptor(item: CatalogItem) {
+  return `${item.type} ${item.container_type ?? ""} ${item.source_type ?? ""} ${displayName(item)} ${item.path.join(".")}`.toUpperCase();
+}
+
+function isViewItem(item: CatalogItem) {
+  const descriptor = itemDescriptor(item);
+  return descriptor.includes("VIEW") || descriptor.includes("VIRTUAL_DATASET");
+}
+
+function isTableItem(item: CatalogItem) {
+  const descriptor = itemDescriptor(item);
+  return (
+    descriptor.includes("TABLE") ||
+    descriptor.includes("PHYSICAL_DATASET") ||
+    (descriptor.includes("DATASET") && !isViewItem(item) && !isFileItem(item))
+  );
+}
+
+function isFileItem(item: CatalogItem) {
+  const descriptor = itemDescriptor(item);
+  return descriptor.includes("FILE") || fileKind(item) !== "generic";
+}
+
+function fileIconForItem(item: CatalogItem) {
+  const kind = fileKind(item);
+  if (["csv", "xls", "xlsx"].includes(kind)) {
+    return FileSpreadsheet;
+  }
+  if (kind === "json") {
+    return FileJson;
+  }
+  if (["parquet", "orc", "avro", "delta", "iceberg"].includes(kind)) {
+    return FileArchive;
+  }
+  if (["xml", "sql"].includes(kind)) {
+    return FileCode;
+  }
+  return FileText;
+}
+
+function fileKind(item: CatalogItem) {
+  const name = displayName(item).toLowerCase();
+  const match = name.match(/\.([a-z0-9]+)$/);
+  if (!match) {
+    return "generic";
+  }
+  return match[1];
 }
 
 function titleCase(value: string) {
@@ -1332,6 +1487,7 @@ function AdminList({ title, load }: { title: string; load: () => Promise<{ items
         </div>
         {selectedItem ? (
           <div className="info-panel-body">
+            {title === "Engines" && <EngineStatusIndicator engine={selectedItem} />}
             <div className="metric-row">
               <InfoPill label="Name" value={adminItemName(selectedItem, title)} />
               <InfoPill label="ID" value={String(selectedItem.id ?? "None")} />
@@ -1346,6 +1502,50 @@ function AdminList({ title, load }: { title: string; load: () => Promise<{ items
       </aside>
     </section>
   );
+}
+
+function EngineStatusIndicator({ engine }: { engine: AdminItem }) {
+  const status = engineStatus(engine);
+  return (
+    <div className={`engine-status ${status.kind}`}>
+      <span className="engine-status-light" aria-hidden="true" />
+      <div>
+        <strong>{status.label}</strong>
+        <span>{status.raw}</span>
+      </div>
+    </div>
+  );
+}
+
+function engineStatus(engine: AdminItem): { kind: "started" | "off" | "unknown"; label: string; raw: string } {
+  const raw = String(
+    engine.status ??
+      engine.state ??
+      engine.engineState ??
+      engine.currentState ??
+      engine.desiredState ??
+      "Unknown"
+  );
+  const normalized = raw.trim().toUpperCase();
+  if (["STARTED", "RUNNING", "ONLINE", "ACTIVE", "ENABLED"].includes(normalized)) {
+    return { kind: "started", label: "Started", raw };
+  }
+  if (
+    [
+      "STOPPED",
+      "STOPPING",
+      "OFF",
+      "OFFLINE",
+      "DISABLED",
+      "FAILED",
+      "CANCELED",
+      "CANCELLED",
+      "DELETED",
+    ].includes(normalized)
+  ) {
+    return { kind: "off", label: "Off", raw };
+  }
+  return { kind: "unknown", label: "Unknown", raw };
 }
 
 function adminIcon(title: string) {

@@ -110,6 +110,44 @@ class FakeTransientJobsDremioClient(DremioClient):
         }
 
 
+class FakeFailedPrimaryJobsDremioClient(DremioClient):
+    def __init__(self) -> None:
+        self.submitted_sql: list[str] = []
+        self._job_poll_attempts = 1
+        self._job_poll_interval = 0
+
+    async def submit_sql(self, sql: str, context: list[str] | None = None) -> str:
+        self.submitted_sql.append(sql)
+        return "primary-job" if len(self.submitted_sql) == 1 else "fallback-job"
+
+    async def get_job(self, job_id: str) -> dict[str, Any]:
+        if job_id == "primary-job":
+            return {"id": job_id, "jobState": "FAILED"}
+        return {"id": job_id, "jobState": "COMPLETED"}
+
+    async def get_job_results(
+        self,
+        job_id: str,
+        offset: int = 0,
+        limit: int = 100,
+    ) -> dict[str, Any]:
+        if job_id == "primary-job":
+            raise DremioError(
+                'Dremio 400: {"errorMessage":"Can not fetch details for a job that is not '
+                'completed.","moreInfo":""}'
+            )
+        return {
+            "rows": [
+                {
+                    "job_id": "job-2",
+                    "user_name": "engineer",
+                    "status": "COMPLETED",
+                    "query": "SELECT 2",
+                }
+            ]
+        }
+
+
 class FakeFailingJobsDremioClient(FakeDremioClient):
     async def list_recent_jobs(self, limit: int = 50):
         raise DremioError("Dremio 400: transient job-state failure")
@@ -456,6 +494,16 @@ async def test_recent_jobs_retries_transient_metadata_retrieval() -> None:
 
     assert dremio.result_attempts == 2
     assert jobs[0].id == "job-1"
+
+
+async def test_recent_jobs_falls_back_when_projected_jobs_query_fails() -> None:
+    dremio = FakeFailedPrimaryJobsDremioClient()
+
+    jobs = await dremio.list_recent_jobs(limit=50)
+
+    assert len(dremio.submitted_sql) == 2
+    assert "SELECT * FROM sys.jobs_recent" in dremio.submitted_sql[1]
+    assert jobs[0].id == "job-2"
 
 
 def test_jobs_returns_warning_when_history_is_unavailable() -> None:

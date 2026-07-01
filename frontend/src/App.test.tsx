@@ -80,6 +80,46 @@ describe("App", () => {
       expect(writeText).toHaveBeenCalledWith("catalog.test.reportnet3.energyfromRN3")
     );
     expect(await screen.findByText("Copied")).toBeInTheDocument();
+    expect(screen.queryByText("Object name")).not.toBeInTheDocument();
+  });
+
+  it("labels source, view, table, and file catalog entries distinctly", async () => {
+    mockAuthenticatedFetch({
+      catalogItems: [
+        { id: "s3-source", path: ["s3-source"], type: "SOURCE", source_type: "S3" },
+        { id: "sql-source", path: ["sql-source"], type: "SOURCE", source_type: "MSSQL" },
+        { id: "orders-view", path: ["catalog", "orders_view"], type: "VIRTUAL_DATASET" },
+        { id: "orders-table", path: ["catalog", "orders_table"], type: "PHYSICAL_DATASET" },
+        { id: "sales-csv", path: ["catalog", "sales.csv"], type: "FILE" }
+      ]
+    });
+    render(<App />);
+
+    expect(await screen.findByText("S3")).toBeInTheDocument();
+    expect(screen.getByText("MSSQL")).toBeInTheDocument();
+    expect(screen.getByText("View")).toBeInTheDocument();
+    expect(screen.getByText("Table")).toBeInTheDocument();
+    expect(screen.getByText("CSV File")).toBeInTheDocument();
+  });
+
+  it("shows started and off engine lights in the engine info pane", async () => {
+    mockAuthenticatedFetch({
+      engineItems: [
+        { id: "hot", name: "Hot engine", status: "STARTED" },
+        { id: "cold", name: "Cold engine", status: "STOPPED" }
+      ]
+    });
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole("button", { name: /Engines/i }));
+
+    expect(await screen.findByText("Started")).toBeInTheDocument();
+    expect(document.querySelector(".engine-status.started")).toBeInTheDocument();
+
+    fireEvent.click(await screen.findByText("Cold engine"));
+
+    expect(await screen.findByText("Off")).toBeInTheDocument();
+    expect(document.querySelector(".engine-status.off")).toBeInTheDocument();
   });
 
   it("submitting a question appends messages and renders selected raw response", async () => {
@@ -104,10 +144,17 @@ describe("App", () => {
 type MockCatalogItem = {
   id: string;
   path: string[];
+  source_type?: string;
   type: string;
 };
 
-function mockAuthenticatedFetch({ catalogItems = [] }: { catalogItems?: MockCatalogItem[] } = {}) {
+function mockAuthenticatedFetch({
+  catalogItems = [],
+  engineItems = []
+}: {
+  catalogItems?: MockCatalogItem[];
+  engineItems?: Array<Record<string, unknown>>;
+} = {}) {
   vi.stubGlobal(
     "fetch",
     vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -129,6 +176,9 @@ function mockAuthenticatedFetch({ catalogItems = [] }: { catalogItems?: MockCata
       }
       if (url === "/api/jobs?limit=50") {
         return jsonResponse({ jobs: [], warning: "Job history unavailable" });
+      }
+      if (url === "/api/admin/engines") {
+        return jsonResponse({ items: engineItems });
       }
       if (url === "/api/qna" && init?.method === "POST") {
         return jsonResponse({

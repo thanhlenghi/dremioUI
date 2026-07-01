@@ -400,40 +400,31 @@ h3 {
   overflow-wrap: anywhere;
 }
 
-.object-name-copy {
+.info-panel-path {
   align-items: center;
-  background: #252526;
-  border: 1px solid #3c3c3c;
-  border-radius: 4px;
-  display: grid;
-  gap: 10px;
-  grid-template-columns: minmax(0, 1fr) auto auto;
-  padding: 10px 12px;
-}
-
-.object-name-copy div {
-  display: grid;
-  gap: 3px;
+  display: flex;
+  gap: 6px;
+  margin-top: 3px;
   min-width: 0;
 }
 
-.object-name-copy span,
-.object-name-copy small {
+.info-panel-path span,
+.info-panel-path small {
   color: #858585;
   font-size: 12px;
+  margin: 0;
 }
 
-.object-name-copy strong {
-  color: #d4d4d4;
-  font-size: 13px;
+.info-panel-path span {
   overflow-wrap: anywhere;
 }
 
-.object-name-copy button {
-  height: 32px;
-  min-height: 32px;
-  padding: 6px;
-  width: 32px;
+.info-panel-path button {
+  flex: 0 0 auto;
+  height: 22px;
+  min-height: 22px;
+  padding: 3px;
+  width: 22px;
 }
 
 .catalog-browser,
@@ -487,6 +478,15 @@ h3 {
   font-size: 12px;
   margin-top: 3px;
   overflow-wrap: anywhere;
+}
+
+.info-panel-header .info-panel-path {
+  display: flex;
+}
+
+.info-panel-header .info-panel-path span,
+.info-panel-header .info-panel-path small {
+  margin: 0;
 }
 
 .catalog-search {
@@ -563,13 +563,65 @@ h3 {
   color: #c5c5c5;
 }
 
+.tree-label .catalog-icon.source-s3 {
+  color: #4fc1ff;
+}
+
+.tree-label .catalog-icon.source-mssql,
+.tree-label .catalog-icon.source-mysql,
+.tree-label .catalog-icon.source-oracle,
+.tree-label .catalog-icon.source-postgres,
+.tree-label .catalog-icon.source-sql,
+.tree-label .catalog-icon.source-teradata {
+  color: #d7ba7d;
+}
+
+.tree-label .catalog-icon.source-bigquery,
+.tree-label .catalog-icon.source-redshift,
+.tree-label .catalog-icon.source-snowflake {
+  color: #9cdcfe;
+}
+
+.tree-label .catalog-icon.source-catalog {
+  color: #b5cea8;
+}
+
+.tree-label .catalog-icon.source-filesystem,
+.tree-label .catalog-icon.file-avro,
+.tree-label .catalog-icon.file-csv,
+.tree-label .catalog-icon.file-delta,
+.tree-label .catalog-icon.file-generic,
+.tree-label .catalog-icon.file-iceberg,
+.tree-label .catalog-icon.file-json,
+.tree-label .catalog-icon.file-orc,
+.tree-label .catalog-icon.file-parquet,
+.tree-label .catalog-icon.file-sql,
+.tree-label .catalog-icon.file-xls,
+.tree-label .catalog-icon.file-xlsx,
+.tree-label .catalog-icon.file-xml {
+  color: #ce9178;
+}
+
+.tree-label .catalog-icon.view {
+  color: #c586c0;
+}
+
+.tree-label .catalog-icon.table {
+  color: #4ec9b0;
+}
+
+.tree-label .catalog-icon.folder {
+  color: #dcdcaa;
+}
+
 .tree-label span {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.tree-label small {
+.tree-label small,
+.object-type-badge {
   color: #858585;
   font-size: 11px;
   justify-self: end;
@@ -628,6 +680,56 @@ h3 {
 
 .admin-tree-label {
   grid-template-columns: 18px minmax(0, 1fr) minmax(64px, auto);
+}
+
+.engine-status {
+  align-items: center;
+  background: #252526;
+  border: 1px solid #3c3c3c;
+  border-radius: 4px;
+  display: flex;
+  gap: 10px;
+  padding: 10px 12px;
+}
+
+.engine-status-light {
+  border-radius: 999px;
+  display: block;
+  flex: 0 0 auto;
+  height: 12px;
+  width: 12px;
+}
+
+.engine-status.started .engine-status-light {
+  background: #3fb950;
+  box-shadow: 0 0 0 3px rgba(63, 185, 80, 0.16);
+}
+
+.engine-status.off .engine-status-light {
+  background: #f85149;
+  box-shadow: 0 0 0 3px rgba(248, 81, 73, 0.16);
+}
+
+.engine-status.unknown .engine-status-light {
+  background: #858585;
+  box-shadow: 0 0 0 3px rgba(133, 133, 133, 0.16);
+}
+
+.engine-status div {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.engine-status strong {
+  color: #d4d4d4;
+  font-size: 13px;
+}
+
+.engine-status span:last-child {
+  color: #858585;
+  font-size: 12px;
+  overflow-wrap: anywhere;
 }
 
 .rbac-panel {

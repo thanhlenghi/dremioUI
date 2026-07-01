@@ -116,15 +116,25 @@ class DremioClient:
         return await self._request("GET", f"/api/v3/job/{encoded}/results", params={"offset": offset, "limit": limit})
 
     async def list_recent_jobs(self, limit: int = 50) -> list[JobSummary]:
-        sql = (
-            "SELECT job_id, user_name, query_type, status, start_time, duration, query "
-            "FROM sys.jobs_recent ORDER BY start_time DESC LIMIT "
-            f"{max(1, min(limit, 200))}"
-        )
-        job_id = await self.submit_sql(sql)
-        data = await self._wait_for_job_results(job_id, limit=limit)
-        rows = data.get("rows", data.get("data", []))
-        return [self._job_summary(row) for row in rows]
+        bounded_limit = max(1, min(limit, 200))
+        queries = [
+            (
+                "SELECT job_id, user_name, query_type, status, start_time, duration, query "
+                "FROM sys.jobs_recent ORDER BY start_time DESC LIMIT "
+                f"{bounded_limit}"
+            ),
+            f"SELECT * FROM sys.jobs_recent LIMIT {bounded_limit}",
+        ]
+        last_error: DremioError | None = None
+        for sql in queries:
+            try:
+                job_id = await self.submit_sql(sql)
+                data = await self._wait_for_job_results(job_id, limit=bounded_limit)
+                rows = data.get("rows", data.get("data", []))
+                return [self._job_summary(row) for row in rows]
+            except DremioError as exc:
+                last_error = exc
+        raise DremioError("Could not load recent jobs from sys.jobs_recent") from last_error
 
     async def _wait_for_job_results(self, job_id: str, limit: int) -> dict[str, Any]:
         last_error: DremioError | None = None
