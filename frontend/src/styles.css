@@ -400,6 +400,42 @@ h3 {
   overflow-wrap: anywhere;
 }
 
+.object-name-copy {
+  align-items: center;
+  background: #252526;
+  border: 1px solid #3c3c3c;
+  border-radius: 4px;
+  display: grid;
+  gap: 10px;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  padding: 10px 12px;
+}
+
+.object-name-copy div {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.object-name-copy span,
+.object-name-copy small {
+  color: #858585;
+  font-size: 12px;
+}
+
+.object-name-copy strong {
+  color: #d4d4d4;
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+.object-name-copy button {
+  height: 32px;
+  min-height: 32px;
+  padding: 6px;
+  width: 32px;
+}
+
 .catalog-browser,
 .info-panel {
   background: #252526;
@@ -763,7 +799,8 @@ h3 {
 }
 
 .error,
-.success {
+.success,
+.warning {
   border-radius: 4px;
   padding: 10px 12px;
 }
@@ -779,6 +816,12 @@ h3 {
   border: 1px solid #2f6f44;
   color: #89d185;
   margin-top: 12px;
+}
+
+.warning {
+  background: #332b1f;
+  border: 1px solid #7a6330;
+  color: #d7ba7d;
 }
 
 .answer {

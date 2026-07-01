@@ -45,6 +45,7 @@ class JobSummary(BaseModel):
 
 class JobsResponse(BaseModel):
     jobs: list[JobSummary]
+    warning: str | None = None
 
 
 class SqlRequest(BaseModel):

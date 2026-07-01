@@ -3,6 +3,8 @@ import {
   ChevronDown,
   ChevronRight,
   Cloud,
+  Check,
+  Copy,
   Database,
   Eye,
   File,
@@ -179,7 +181,9 @@ function CatalogView({
   const [detailsLoading, setDetailsLoading] = useState(false);
   const [filter, setFilter] = useState("");
   const [error, setError] = useState("");
+  const [copyStatus, setCopyStatus] = useState("");
   const [loading, setLoading] = useState(false);
+  const selectedObjectName = selectedObject ? selectedObject.path.join(".") : "";
 
   async function loadRoot() {
     setLoading(true);
@@ -202,6 +206,7 @@ function CatalogView({
       setDetails(null);
       return;
     }
+    setCopyStatus("");
     setDetailsLoading(true);
     setError("");
     api
@@ -240,6 +245,18 @@ function CatalogView({
         nextLoading.delete(item.id);
         return nextLoading;
       });
+    }
+  }
+
+  async function copySelectedObjectName() {
+    if (!selectedObjectName) {
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(selectedObjectName);
+      setCopyStatus("Copied");
+    } catch {
+      setCopyStatus("Copy failed");
     }
   }
 
@@ -298,11 +315,26 @@ function CatalogView({
           </div>
           <div>
             <h2>{selectedObject ? displayName(selectedObject) : "Object Info"}</h2>
-            <span>{selectedObject ? selectedObject.path.join(".") : "Select an object in the tree"}</span>
+            <span>{selectedObject ? selectedObjectName : "Select an object in the tree"}</span>
           </div>
         </div>
         {selectedObject ? (
           <div className="info-panel-body">
+            <div className="object-name-copy">
+              <div>
+                <span>Object name</span>
+                <strong>{selectedObjectName}</strong>
+              </div>
+              <button
+                type="button"
+                onClick={copySelectedObjectName}
+                title="Copy object name"
+                aria-label="Copy object name"
+              >
+                {copyStatus === "Copied" ? <Check size={16} /> : <Copy size={16} />}
+              </button>
+              {copyStatus && <small>{copyStatus}</small>}
+            </div>
             <div className="metric-row">
               <InfoPill label="Type" value={objectTypeLabel(selectedObject)} />
               <InfoPill label="ID" value={selectedObject.id} />
@@ -986,14 +1018,17 @@ function filterTree(
 function JobsView() {
   const [jobs, setJobs] = useState<JobSummary[]>([]);
   const [error, setError] = useState("");
+  const [warning, setWarning] = useState("");
   const [loading, setLoading] = useState(false);
 
   async function loadJobs() {
     setLoading(true);
     setError("");
+    setWarning("");
     try {
       const response = await api.jobs();
       setJobs(response.jobs);
+      setWarning(response.warning ?? "");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not load jobs");
     } finally {
@@ -1015,6 +1050,7 @@ function JobsView() {
       </div>
       {loading && <div className="muted">Loading jobs</div>}
       {error && <div className="error">{error}</div>}
+      {warning && <div className="warning">{warning}</div>}
       <table>
         <thead>
           <tr>

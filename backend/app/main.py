@@ -119,7 +119,7 @@ async def catalog_root(
     return CatalogChildrenResponse(items=await client.list_catalog_root())
 
 
-@app.get("/api/catalog/{catalog_id}/children", response_model=CatalogChildrenResponse)
+@app.get("/api/catalog/{catalog_id:path}/children", response_model=CatalogChildrenResponse)
 async def catalog_children(
     catalog_id: str,
     client: DremioClient = Depends(get_dremio_client),
@@ -127,7 +127,7 @@ async def catalog_children(
     return CatalogChildrenResponse(items=await client.list_catalog_children(catalog_id))
 
 
-@app.get("/api/catalog/{catalog_id}", response_model=ObjectDetailsResponse)
+@app.get("/api/catalog/{catalog_id:path}", response_model=ObjectDetailsResponse)
 async def catalog_object(
     catalog_id: str,
     client: DremioClient = Depends(get_dremio_client),
@@ -139,7 +139,10 @@ async def catalog_object(
 
 @app.get("/api/jobs", response_model=JobsResponse)
 async def jobs(limit: int = 50, client: DremioClient = Depends(get_dremio_client)) -> JobsResponse:
-    return JobsResponse(jobs=await client.list_recent_jobs(limit=limit))
+    try:
+        return JobsResponse(jobs=await client.list_recent_jobs(limit=limit))
+    except DremioError as exc:
+        return JobsResponse(jobs=[], warning=str(exc))
 
 
 @app.post("/api/sql", response_model=SqlResponse)

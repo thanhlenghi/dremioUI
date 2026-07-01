@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "./App";
 
@@ -45,6 +45,43 @@ describe("App", () => {
     expect(screen.queryByLabelText("RBAC user or email")).not.toBeInTheDocument();
   });
 
+  it("renders a jobs warning without leaving the Jobs view", async () => {
+    mockAuthenticatedFetch();
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole("button", { name: /Jobs/i }));
+
+    expect(await screen.findByText("Recent Jobs")).toBeInTheDocument();
+    expect(await screen.findByText("Job history unavailable")).toBeInTheDocument();
+    expect(screen.getByText("No recent jobs returned.")).toBeInTheDocument();
+  });
+
+  it("copies the selected catalog object name from the info pane", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText }
+    });
+    mockAuthenticatedFetch({
+      catalogItems: [
+        {
+          id: "reportnet3-energy",
+          path: ["catalog", "test", "reportnet3", "energyfromRN3"],
+          type: "DATASET"
+        }
+      ]
+    });
+    render(<App />);
+
+    fireEvent.click(await screen.findByText("energyfromRN3"));
+    fireEvent.click(await screen.findByLabelText("Copy object name"));
+
+    await waitFor(() =>
+      expect(writeText).toHaveBeenCalledWith("catalog.test.reportnet3.energyfromRN3")
+    );
+    expect(await screen.findByText("Copied")).toBeInTheDocument();
+  });
+
   it("submitting a question appends messages and renders selected raw response", async () => {
     mockAuthenticatedFetch();
     render(<App />);
@@ -64,7 +101,13 @@ describe("App", () => {
   });
 });
 
-function mockAuthenticatedFetch() {
+type MockCatalogItem = {
+  id: string;
+  path: string[];
+  type: string;
+};
+
+function mockAuthenticatedFetch({ catalogItems = [] }: { catalogItems?: MockCatalogItem[] } = {}) {
   vi.stubGlobal(
     "fetch",
     vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -73,7 +116,19 @@ function mockAuthenticatedFetch() {
         return jsonResponse({ authenticated: true, user_id: "allowed@example.org" });
       }
       if (url === "/api/catalog") {
-        return jsonResponse({ items: [] });
+        return jsonResponse({ items: catalogItems });
+      }
+      if (url.startsWith("/api/catalog/") && !url.endsWith("/children")) {
+        const catalogId = decodeURIComponent(url.replace("/api/catalog/", ""));
+        const item = catalogItems.find((catalogItem) => catalogItem.id === catalogId);
+        return jsonResponse({
+          id: catalogId,
+          raw: { id: catalogId, path: item?.path ?? [] },
+          permissions: { effectivePermissions: [], grants: [] }
+        });
+      }
+      if (url === "/api/jobs?limit=50") {
+        return jsonResponse({ jobs: [], warning: "Job history unavailable" });
       }
       if (url === "/api/qna" && init?.method === "POST") {
         return jsonResponse({

@@ -1,7 +1,7 @@
 import type {
   AdminItem,
   CatalogItem,
-  JobSummary,
+  JobsResponse,
   ObjectDetails,
   QnaResponse,
   RbacExplanation,
@@ -40,7 +40,7 @@ export const api = {
     request<{ items: CatalogItem[] }>(`/api/catalog/${encodeURIComponent(id)}/children`),
   objectDetails: (id: string) =>
     request<ObjectDetails>(`/api/catalog/${encodeURIComponent(id)}`),
-  jobs: (limit = 50) => request<{ jobs: JobSummary[] }>(`/api/jobs?limit=${limit}`),
+  jobs: (limit = 50) => request<JobsResponse>(`/api/jobs?limit=${limit}`),
   runSql: (sql: string, context: string[]) =>
     request<{ job_id: string }>("/api/sql", {
       method: "POST",

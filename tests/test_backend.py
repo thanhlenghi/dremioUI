@@ -234,6 +234,38 @@ def test_catalog_returns_items_for_session() -> None:
     assert response.json()["items"][0]["id"] == "src"
 
 
+def test_catalog_children_accepts_s3_source_id_with_slashes() -> None:
+    async def current_session() -> UserSession:
+        return UserSession(user_id="allowed@example.org", dremio_token="token")
+
+    app.dependency_overrides[get_current_session] = current_session
+    try:
+        for test_client in client(mock_dremio=True):
+            response = test_client.get(
+                "/api/catalog/dremio%3A/nossl_s3/testbucket/children"
+            )
+    finally:
+        app.dependency_overrides.pop(get_current_session, None)
+
+    assert response.status_code == 200
+    assert response.json()["items"][0]["id"] == "dremio:/nossl_s3/testbucket.table"
+
+
+def test_catalog_object_accepts_s3_source_id_with_slashes() -> None:
+    async def current_session() -> UserSession:
+        return UserSession(user_id="allowed@example.org", dremio_token="token")
+
+    app.dependency_overrides[get_current_session] = current_session
+    try:
+        for test_client in client(mock_dremio=True):
+            response = test_client.get("/api/catalog/dremio%3A/nossl_s3/testbucket")
+    finally:
+        app.dependency_overrides.pop(get_current_session, None)
+
+    assert response.status_code == 200
+    assert response.json()["id"] == "dremio:/nossl_s3/testbucket"
+
+
 def test_catalog_item_preserves_source_type() -> None:
     item = DremioClient._catalog_item(
         {
@@ -426,7 +458,7 @@ async def test_recent_jobs_retries_transient_metadata_retrieval() -> None:
     assert jobs[0].id == "job-1"
 
 
-def test_dremio_errors_return_bad_gateway() -> None:
+def test_jobs_returns_warning_when_history_is_unavailable() -> None:
     async def current_session() -> UserSession:
         return UserSession(user_id="allowed@example.org", dremio_token="token")
 
@@ -438,5 +470,6 @@ def test_dremio_errors_return_bad_gateway() -> None:
     finally:
         app.dependency_overrides.pop(get_current_session, None)
 
-    assert response.status_code == 502
-    assert "transient job-state failure" in response.json()["detail"]
+    assert response.status_code == 200
+    assert response.json()["jobs"] == []
+    assert "transient job-state failure" in response.json()["warning"]

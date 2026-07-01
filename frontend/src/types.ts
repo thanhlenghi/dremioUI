@@ -28,6 +28,11 @@ export type JobSummary = {
   sql?: string | null;
 };
 
+export type JobsResponse = {
+  jobs: JobSummary[];
+  warning?: string | null;
+};
+
 export type QnaResponse = {
   answer: string;
   draft_sql?: string | null;
