@@ -262,12 +262,8 @@ function CatalogView({
     if (!selectedObjectName) {
       return;
     }
-    try {
-      await navigator.clipboard.writeText(selectedObjectName);
-      setCopyStatus("Copied");
-    } catch {
-      setCopyStatus("Copy failed");
-    }
+    const copied = await copyTextToClipboard(selectedObjectName);
+    setCopyStatus(copied ? "Copied" : "Copy failed");
   }
 
   const visibleRoots = useMemo(
@@ -796,6 +792,38 @@ function inheritedLabel(grant: NormalizedGrant) {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+async function copyTextToClipboard(text: string) {
+  const writeText = navigator.clipboard?.writeText.bind(navigator.clipboard);
+  try {
+    if (writeText) {
+      await writeText(text);
+      return true;
+    }
+  } catch {
+    // Fall through to the DOM copy path for browsers that block Clipboard API access.
+  }
+  return copyTextWithSelection(text);
+}
+
+function copyTextWithSelection(text: string) {
+  if (typeof document.execCommand !== "function") {
+    return false;
+  }
+  const input = document.createElement("textarea");
+  input.value = text;
+  input.setAttribute("readonly", "");
+  input.style.position = "fixed";
+  input.style.left = "-9999px";
+  input.style.top = "0";
+  document.body.appendChild(input);
+  input.select();
+  try {
+    return document.execCommand("copy");
+  } finally {
+    input.remove();
+  }
 }
 
 function normalizeCatalogItem(item: CatalogItem): CatalogItem {

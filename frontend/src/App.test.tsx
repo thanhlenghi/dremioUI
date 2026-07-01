@@ -83,6 +83,36 @@ describe("App", () => {
     expect(screen.queryByText("Object name")).not.toBeInTheDocument();
   });
 
+  it("falls back when browser clipboard access rejects", async () => {
+    const writeText = vi.fn().mockRejectedValue(new Error("clipboard blocked"));
+    const execCommand = vi.fn().mockReturnValue(true);
+    Object.defineProperty(document, "execCommand", {
+      configurable: true,
+      value: execCommand
+    });
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText }
+    });
+    mockAuthenticatedFetch({
+      catalogItems: [
+        {
+          id: "reportnet3-energy",
+          path: ["catalog", "test", "reportnet3", "energyfromRN3"],
+          type: "DATASET"
+        }
+      ]
+    });
+    render(<App />);
+
+    fireEvent.click(await screen.findByText("energyfromRN3"));
+    fireEvent.click(await screen.findByLabelText("Copy object name"));
+
+    expect(await screen.findByText("Copied")).toBeInTheDocument();
+    expect(execCommand).toHaveBeenCalledWith("copy");
+    expect(screen.queryByText("Copy failed")).not.toBeInTheDocument();
+  });
+
   it("labels source, view, table, and file catalog entries distinctly", async () => {
     mockAuthenticatedFetch({
       catalogItems: [
